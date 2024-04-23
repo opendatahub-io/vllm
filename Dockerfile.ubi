@@ -14,6 +14,11 @@ ARG TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 8.9 9.0+PTX"
 
 ## Base Layer ##################################################################
 FROM registry.access.redhat.com/ubi9/ubi-minimal:${BASE_UBI_IMAGE_TAG} as base
+ARG PYTHON_VERSION
+
+RUN microdnf install -y \
+    python${PYTHON_VERSION}-pip python${PYTHON_VERSION}-wheel \
+    && microdnf clean all
 
 WORKDIR /workspace
 
@@ -30,20 +35,16 @@ RUN microdnf install -y \
 FROM base as python-install
 
 ARG PYTHON_VERSION
-ARG MINIFORGE_VERSION=23.11.0-0
 
-RUN curl -fsSL -o ~/miniforge3.sh -O  "https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}/Miniforge3-$(uname)-$(uname -m).sh" && \
-    chmod +x ~/miniforge3.sh && \
-    bash ~/miniforge3.sh -b -p /opt/conda && \
-    source "/opt/conda/etc/profile.d/conda.sh" && \
-    conda create -y -p /opt/vllm python=${PYTHON_VERSION} && \
-    conda activate /opt/vllm && \
-    rm ~/miniforge3.sh
-# use of the /opt/vllm env requires:
-# ENV PATH=/opt/vllm/bin/:$PATH
+ENV VIRTUAL_ENV=/opt/vllm
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+RUN microdnf install -y \
+    python${PYTHON_VERSION}-devel python${PYTHON_VERSION}-pip python${PYTHON_VERSION}-wheel && \
+    python${PYTHON_VERSION} -m venv $VIRTUAL_ENV && pip install --no-cache -U pip wheel && microdnf clean all
+
 
 ## CUDA Base ###################################################################
-FROM base as cuda-base
+FROM python-install as cuda-base
 
 # The Nvidia operator won't allow deploying on CUDA 12.0 hosts if
 # this env var is set to 12.2.0, even though it's compatible
@@ -63,26 +64,11 @@ RUN microdnf install -y \
         cuda-compat-12-2-${NV_CUDA_COMPAT_VERSION} \
     && microdnf clean all
 
-ENV CUDA_HOME="/usr/local/cuda" \
-    PATH="/usr/local/nvidia/bin:${CUDA_HOME}/bin:${PATH}" \
-    LD_LIBRARY_PATH="/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$CUDA_HOME/lib64:$CUDA_HOME/extras/CUPTI/lib64:${LD_LIBRARY_PATH}"
 
-
-## CUDA Runtime ################################################################
-FROM cuda-base as cuda-runtime
-
-ENV NV_NVTX_VERSION=12.2.53-1 \
-    NV_LIBNPP_VERSION=12.1.1.14-1 \
-    NV_LIBCUBLAS_VERSION=12.2.1.16-1 \
-    NV_LIBNCCL_PACKAGE_VERSION=2.18.5-1+cuda12.2
-
-RUN microdnf install -y \
-        cuda-libraries-12-2-${NV_CUDA_LIB_VERSION} \
-        cuda-nvtx-12-2-${NV_NVTX_VERSION} \
-        libnpp-12-2-${NV_LIBNPP_VERSION} \
-        libcublas-12-2-${NV_LIBCUBLAS_VERSION} \
-        libnccl-${NV_LIBNCCL_PACKAGE_VERSION} \
-    && microdnf clean all
+ARG CUDA_HOME="/usr/local/cuda"
+ENV CUDA_HOME=${CUDA_HOME}\
+    PATH="${CUDA_HOME}/bin:${PATH}" \
+    LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/extras/CUPTI/lib64:${LD_LIBRARY_PATH}"
 
 
 ## CUDA Development ############################################################
@@ -114,16 +100,16 @@ ENV LIBRARY_PATH="$CUDA_HOME/lib64/stubs"
 RUN ldconfig /usr/local/cuda-12.2/compat/
 
 ## Python cuda base #################################################################
-FROM cuda-devel as python-cuda-base
+FROM cuda-devel AS python-cuda-base
 
-COPY --from=python-install /opt/vllm /opt/vllm
-ENV PATH=/opt/vllm/bin/:$PATH
+ENV VIRTUAL_ENV=/opt/vllm
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # install cuda and common dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=bind,source=requirements-common.txt,target=requirements-common.txt \
     --mount=type=bind,source=requirements-cuda.txt,target=requirements-cuda.txt \
-    pip3 install \
+    pip install \
         -r requirements-cuda.txt
 
 ## Development #################################################################
@@ -179,6 +165,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=bind,source=requirements-build.txt,target=requirements-build.txt \
     pip install -r requirements-build.txt
 
+# install compiler cache to speed up compilation leveraging local or remote caching
+RUN rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && rpm -ql epel-release && microdnf install -y ccache && microdnf clean all
+# install build dependencies
+
 # copy input files
 COPY csrc csrc
 COPY setup.py setup.py
@@ -187,7 +177,6 @@ COPY CMakeLists.txt CMakeLists.txt
 COPY requirements-common.txt requirements-common.txt
 COPY requirements-cuda.txt requirements-cuda.txt
 COPY pyproject.toml pyproject.toml
-COPY vllm/__init__.py vllm/__init__.py
 
 ARG TORCH_CUDA_ARCH_LIST
 ENV TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST
@@ -201,7 +190,7 @@ ENV NVCC_THREADS=$nvcc_threads
 # make sure punica kernels are built (for LoRA)
 ENV VLLM_INSTALL_PUNICA_KERNELS=1
 
-# Setup path stuff? Ref: https://github.com/vllm-project/vllm/blob/main/.github/workflows/scripts/build.sh#L6-L8
+# Make sure the cuda environment is in the PATH
 ENV PATH=/usr/local/cuda/bin:$PATH
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 
@@ -220,10 +209,12 @@ COPY --from=gen-protos /workspace/vllm/entrypoints/grpc/pb vllm/entrypoints/grpc
 ENV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
     --mount=type=cache,target=/root/.cache/pip \
-    python3 setup.py bdist_wheel --dist-dir=dist
+    python setup.py bdist_wheel --dist-dir=dist
 
 #################### FLASH_ATTENTION Build IMAGE ####################
 FROM dev as flash-attn-builder
+ENV VIRTUAL_ENV=/opt/vllm/bin
+ENV PATH=${VIRTUAL_ENV}/bin:$PATH
 
 RUN microdnf install -y git \
     && microdnf clean all
@@ -246,13 +237,16 @@ RUN pip --verbose wheel flash-attn==${FLASH_ATTN_VERSION} \
 # We used base cuda image because pytorch installs its own cuda libraries.
 # However pynccl depends on cuda libraries so we had to switch to the runtime image
 # In the future it would be nice to get a container with pytorch and cuda without duplicating cuda
-FROM cuda-runtime AS vllm-openai
+FROM python-install AS vllm-openai
 
 WORKDIR /workspace
 
-# Create release python environment
-COPY --from=python-cuda-base /opt/vllm /opt/vllm
-ENV PATH=/opt/vllm/bin/:$PATH
+ENV VIRTUAL_ENV=/opt/vllm
+ENV PATH=$VIRTUAL_ENV/bin/:$PATH
+
+# Triton needs a CC compiler
+RUN microdnf install -y gcc \
+    && microdnf clean all
 
 # install vllm wheel first, so that torch etc will be installed
 RUN --mount=type=bind,from=build,src=/workspace/dist,target=/workspace/dist \
@@ -264,22 +258,19 @@ RUN --mount=type=bind,from=flash-attn-builder,src=/usr/src/flash-attention-v2,ta
     pip install /usr/src/flash-attention-v2/*.whl --no-cache-dir
 
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip3 install \
+    pip install \
         # additional dependencies for the TGIS gRPC server
-        grpcio-tools==1.62.1 \
+        grpcio==1.62.1 \
         # additional dependencies for openai api_server
         accelerate==0.28.0 \
         # hf_transfer for faster HF hub downloads
         hf_transfer==0.1.6
 
-# Triton needs a CC compiler
-RUN microdnf install -y gcc \
-    && microdnf clean all
-
 ENV HF_HUB_OFFLINE=1 \
     PORT=8000 \
     GRPC_PORT=8033 \
     HOME=/home/vllm \
+    VLLM_NCCL_SO_PATH=/opt/vllm/lib/python3.11/site-packages/nvidia/nccl/lib/libnccl.so.2 \
     VLLM_USAGE_SOURCE=production-docker-image
 
 # setup non-root user for OpenShift
