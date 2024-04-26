@@ -102,7 +102,7 @@ class TextGenerationService(generation_pb2_grpc.GenerationServiceServicer):
 
     @property
     def tokenizer_group(self) -> BaseTokenizerGroup:
-        return self.engine.engine
+        return self.engine.engine.tokenizer
 
 
     async def _post_init(self):
