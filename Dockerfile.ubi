@@ -103,7 +103,7 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 RUN microdnf install -y python3.11-devel  \
     && microdnf clean all
-COPY --from=python-base --link /opt/vllm /opt/vllm
+COPY --from=python-base /opt/vllm /opt/vllm
 
 # install compiler cache to speed up compilation leveraging local or remote caching
 RUN rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && rpm -ql epel-release && microdnf install -y ccache && microdnf clean all
@@ -204,7 +204,7 @@ RUN --mount=type=bind,from=flash-attn-builder,src=/usr/src/flash-attention-v2,ta
     pip install /usr/src/flash-attention-v2/*.whl --no-cache-dir
 
 # vLLM will not be installed in site-packages
-COPY --from=build --link /workspace/dist/*whl /tmp
+COPY --from=build /workspace/dist/*whl /tmp
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install /tmp/*whl && rm -f /tmp/*whl
 
