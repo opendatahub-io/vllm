@@ -229,58 +229,6 @@ WORKDIR /usr/src/flash-attention-v2
 RUN pip --verbose wheel flash-attn==${FLASH_ATTN_VERSION} \
     --no-build-isolation --no-deps --no-cache-dir
 
-
-## Test ########################################################################
-FROM dev AS test
-
-WORKDIR /vllm-workspace
-# ADD is used to preserve directory structure
-# NB: Could leak secrets from local context, the test image should not be pushed
-# to a registry
-ADD . /vllm-workspace/
-# copy pytorch extensions separately to avoid having to rebuild
-# when python code changes
-COPY --from=build /workspace/vllm/*.so /vllm-workspace/vllm/
-# Install flash attention (from pre-built wheel)
-RUN --mount=type=bind,from=flash-attn-builder,src=/usr/src/flash-attention-v2,target=/usr/src/flash-attention-v2 \
-    pip install /usr/src/flash-attention-v2/*.whl --no-cache-dir
-# ignore build dependencies installation because we are using pre-complied extensions
-RUN rm pyproject.toml
-RUN --mount=type=cache,target=/root/.cache/pip \
-    VLLM_USE_PRECOMPILED=1 pip install . --verbose
-
-
-## Proto Compilation ###########################################################
-FROM python-base AS gen-protos
-
-RUN microdnf install -y \
-        make \
-        findutils \
-    && microdnf clean all
-
-RUN --mount=type=cache,target=/root/.cache/pip \
-    --mount=type=bind,source=Makefile,target=Makefile \
-    --mount=type=bind,source=proto,target=proto \
-    make gen-protos
-
-## vLLM Library Files ##########################################################
-# Little extra stage to gather files and manage permissions on them without any
-# duplication in the release layer due to permission changes
-FROM base AS vllm
-
-WORKDIR /vllm-staging
-# COPY files from various places into a staging directory
-COPY vllm vllm
-COPY --from=build /workspace/vllm/*.so vllm/
-COPY --from=gen-protos /workspace/vllm/entrypoints/grpc/pb vllm/entrypoints/grpc/pb
-
-# custom COPY command to use umask to control permissions and grant permissions
-# to the group
-RUN umask 002 \
-    && cp --recursive --no-preserve=all /vllm-staging/vllm /workspace/vllm \
-    # not strictly needed, but .so files typically have executable bits
-    && chmod +x /workspace/vllm/*.so
-
 ## Release #####################################################################
 # Note from the non-UBI Dockerfile:
 # We used base cuda image because pytorch installs its own cuda libraries.

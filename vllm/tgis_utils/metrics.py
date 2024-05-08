@@ -118,6 +118,8 @@ class TGISStatLogger(StatLogger):
         # Then log TGIS specific ones
         self.tgi_queue_size.set(stats.num_waiting_sys + stats.num_swapped_sys)
         self.tgi_batch_current_size.set(stats.num_running_sys)
+        self.tgi_queue_size.set(stats.num_waiting_sys + stats.num_swapped_sys)
+        self.tgi_batch_current_size.set(stats.num_running_sys)
 
         for ttft in stats.time_to_first_tokens_iter:
             self.tgi_batch_inference_duration.labels(
