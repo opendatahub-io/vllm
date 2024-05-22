@@ -36,7 +36,7 @@ ENV VIRTUAL_ENV=/opt/vllm
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 RUN microdnf install -y \
     python${PYTHON_VERSION}-devel python${PYTHON_VERSION}-pip python${PYTHON_VERSION}-wheel && \
-    python${PYTHON_VERSION} -m venv $VIRTUAL_ENV && pip install --no-cache -U pip wheel && microdnf clean all
+    python${PYTHON_VERSION} -m venv $VIRTUAL_ENV && pip install --no-cache -U uv pip wheel && microdnf clean all
 
 
 ## CUDA Base ###################################################################
@@ -103,9 +103,10 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # install cuda and common dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=requirements-common.txt,target=requirements-common.txt \
     --mount=type=bind,source=requirements-cuda.txt,target=requirements-cuda.txt \
-    pip install \
+    uv pip install \
         -r requirements-cuda.txt
 
 ## Development #################################################################
@@ -113,6 +114,7 @@ FROM python-cuda-base AS dev
 
 # install build and runtime dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=requirements-common.txt,target=requirements-common.txt \
     --mount=type=bind,source=requirements-cuda.txt,target=requirements-cuda.txt \
     --mount=type=bind,source=requirements-dev.txt,target=requirements-dev.txt \
@@ -140,8 +142,9 @@ FROM dev AS build
 
 # install build dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=requirements-build.txt,target=requirements-build.txt \
-    pip install -r requirements-build.txt
+    uv pip install -r requirements-build.txt
 
 # install compiler cache to speed up compilation leveraging local or remote caching
 RUN rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && rpm -ql epel-release && microdnf install -y ccache && microdnf clean all
@@ -204,11 +207,12 @@ RUN microdnf install -y gcc \
 # install vllm wheel first, so that torch etc will be installed
 RUN --mount=type=bind,from=build,src=/workspace/dist,target=/workspace/dist \
     --mount=type=cache,target=/root/.cache/pip \
-    pip install dist/*.whl --verbose
+    --mount=type=cache,target=/root/.cache/uv \
+    uv pip install dist/*.whl --verbose
 
 # vllm requires a specific nccl version built from source distribution
 # See https://github.com/NVIDIA/nccl/issues/1234
-RUN pip install \
+RUN uv pip install \
         -v \
         --force-reinstall \
         --no-binary="all" \
@@ -217,8 +221,10 @@ RUN pip install \
     mv /root/.config/vllm/nccl/cu12/libnccl.so.2.18.1 /opt/vllm/lib/ && \
     chmod 0755 /opt/vllm/lib/libnccl.so.2.18.1
 
+
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install \
+    --mount=type=cache,target=/root/.cache/uv \
+    uv pip install \
         # additional dependencies for the TGIS gRPC server
         grpcio-tools==1.63.0 \
         # additional dependencies for openai api_server
