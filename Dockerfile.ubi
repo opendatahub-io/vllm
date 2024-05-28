@@ -72,7 +72,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=bind,source=requirements-common.txt,target=requirements-common.txt \
     --mount=type=bind,source=requirements-cuda.txt,target=requirements-cuda.txt \
     pip install \
-        -r requirements-cuda.txt
+        -r requirements-cuda.txt && \
+    find /opt/vllm/lib/ -name ".*\.so.*" -exec strip {} \;
 
 ## Development #################################################################
 FROM python-cuda-base AS dev
@@ -153,7 +154,8 @@ RUN microdnf install -y gcc \
 # install vllm wheel first, so that torch etc will be installed
 RUN --mount=type=bind,from=build,src=/workspace/dist,target=/workspace/dist \
     --mount=type=cache,target=/root/.cache/pip \
-    pip install dist/*.whl --verbose
+    pip install dist/*.whl --verbose && \
+    find /opt/vllm/lib/ -regex ".*\.so.*" -exec strip {} \;
 
 ENV HF_HUB_OFFLINE=1 \
     PORT=8000 \
