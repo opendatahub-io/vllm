@@ -2,7 +2,7 @@
 ARG BASE_UBI_IMAGE_TAG=9.4
 ARG PYTHON_VERSION=3.11
 
-ARG TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 8.9 9.0+PTX"
+ARG TORCH_CUDA_ARCH_LIST="7.5 8.0 8.6 8.9 9.0+PTX"
 
 
 ## Base Layer ##################################################################
@@ -160,7 +160,10 @@ COPY vllm vllm
 ENV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
     --mount=type=cache,target=/root/.cache/pip \
-    CMAKE_BUILD_TYPE=Release python3 setup.py bdist_wheel --dist-dir=dist
+    env CFLAGS="-march=haswell" \
+        CXXFLAGS="$CFLAGS $CXXFLAGS" \
+        CMAKE_BUILD_TYPE=Release \
+        python3 setup.py bdist_wheel --dist-dir=dist
 
 ## Release #####################################################################
 # Note from the non-UBI Dockerfile:
