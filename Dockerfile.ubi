@@ -129,10 +129,6 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
         python3 setup.py bdist_wheel --dist-dir=dist
 
 ## Release #####################################################################
-# Note from the non-UBI Dockerfile:
-# We used base cuda image because pytorch installs its own cuda libraries.
-# However pynccl depends on cuda libraries so we had to switch to the runtime image
-# In the future it would be nice to get a container with pytorch and cuda without duplicating cuda
 FROM python-install AS vllm-openai
 
 WORKDIR /workspace
