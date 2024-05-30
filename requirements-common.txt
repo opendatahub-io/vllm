@@ -8,7 +8,6 @@ py-cpuinfo
 transformers >= 4.40.0  # Required for StarCoder2 & Llava, Llama 3.
 tokenizers >= 0.19.1  # Required for Llama 3.
 fastapi >= 0.109.1
-fastapi
 aiohttp
 openai
 uvicorn[standard]
