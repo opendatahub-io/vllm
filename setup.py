@@ -188,18 +188,19 @@ class cmake_build_ext(build_ext):
             os.makedirs(self.build_temp)
 
         # Build all the extensions
-        for ext in self.extensions:
-            self.configure(ext)
+        self.configure(self.extensions[0])  # configuring it once is enough
+        targets = [remove_prefix(ext.name, "vllm.") for ext in self.extensions]
 
-            ext_target_name = remove_prefix(ext.name, "vllm.")
-            num_jobs, _ = self.compute_num_jobs()
+        num_jobs, _ = self.compute_num_jobs()
 
-            build_args = [
-                '--build', '.', '--target', ext_target_name, '-j',
-                str(num_jobs)
-            ]
+        build_args = [
+            "--build",
+            ".",
+            f"-j={num_jobs}",
+            *[f"--target={name}" for name in targets],
+        ]
 
-            subprocess.check_call(['cmake', *build_args], cwd=self.build_temp)
+        subprocess.check_call(["cmake", *build_args], cwd=self.build_temp)
 
 
 def _is_cuda() -> bool:
