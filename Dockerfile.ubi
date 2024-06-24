@@ -139,7 +139,7 @@ RUN curl -LO https://github.com/jedisct1/libsodium/releases/download/${LIBSODIUM
     && rm -f libsodium*.tar.gz \
     && mv libsodium*/* ./
 
-RUN ./configure && make && make check
+RUN ./configure --prefix="/usr/" && make && make check
 
 ## Release #####################################################################
 FROM python-install AS vllm-openai
@@ -165,7 +165,6 @@ RUN --mount=type=bind,from=build,src=/workspace/dist,target=/workspace/dist \
 RUN --mount=type=bind,from=libsodium-builder,src=/usr/src/libsodium,target=/usr/src/libsodium \
     cd /usr/src/libsodium \
     && make install
-ENV LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
 
 ENV HF_HUB_OFFLINE=1 \
     PORT=8000 \
