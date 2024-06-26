@@ -1,5 +1,6 @@
 #!/bin/bash
-# We can use this script to compute baseline accuracy on GSM for transformers.
+# We can use this script to compute baseline accuracy on GSM for vllm.
+# We use this for fp8, which HF does not support.
 #
 # Make sure you have lm-eval-harness installed:
 #   pip install git+https://github.com/EleutherAI/lm-evaluation-harness.git@9516087b81a61d0e220b22cc1b75be76de23bc10
@@ -16,10 +17,11 @@ usage() {
     echo "  -b    - batch size to run the evaluation at"
     echo "  -l    - limit number of samples to run"
     echo "  -f    - number of fewshot samples to use"
+    echo "  -t    - tensor parallel size to run at"
     echo
 }
 
-while getopts "m:b:l:f:" OPT; do
+while getopts "m:b:l:f:t:" OPT; do
   case ${OPT} in
     m ) 
         MODEL="$OPTARG"
@@ -33,6 +35,9 @@ while getopts "m:b:l:f:" OPT; do
     f ) 
         FEWSHOT="$OPTARG"
         ;;
+    t )
+        TP_SIZE="$OPTARG"
+        ;;
     \? ) 
         usage
         exit 1
@@ -40,7 +45,7 @@ while getopts "m:b:l:f:" OPT; do
   esac
 done
 
-lm_eval --model hf \
-  --model_args pretrained=$MODEL,parallelize=True \
+lm_eval --model vllm \
+  --model_args pretrained=$MODEL,tensor_parallel_size=$TP_SIZE \
   --tasks gsm8k --num_fewshot $FEWSHOT --limit $LIMIT \
   --batch_size $BATCH_SIZE

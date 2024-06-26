@@ -85,7 +85,7 @@ on:
         type: string
         default: "60"
       lm_eval_configuration:
-        description: "configuration for lm-eval test (see neuralmagic/lm-eval)"
+        description: "configuration for lm-eval test (see .github/lm-eval-configs)"
         type: string
         default: ""
 
