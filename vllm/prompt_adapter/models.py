@@ -71,7 +71,7 @@ class PromptAdapterModel(AdapterModel):
             device: str = "cuda",
             dtype: Optional[torch.dtype] = None) -> "PromptAdapterModel":
         from peft.utils import load_peft_weights
-        
+
         adapters_weights = load_peft_weights(adapter_model_path, device)
         prompt_embedding = adapters_weights["prompt_embeddings"].to(dtype)
         num_virtual_tokens = prompt_embedding.shape[0]
