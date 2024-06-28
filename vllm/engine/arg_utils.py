@@ -520,12 +520,14 @@ class EngineArgs:
                             type=int,
                             default=EngineArgs.max_prompt_adapter_token,
                             help='Max number of PromptAdapters tokens')
-        parser.add_argument(
-            "--device",
-            type=str,
-            default=EngineArgs.device,
-            choices=["auto", "cuda", "neuron", "cpu", "tpu", "xpu"],
-            help='Device type for vLLM execution.')
+        parser.add_argument("--device",
+                            type=str,
+                            default=EngineArgs.device,
+                            choices=[
+                                "auto", "cuda", "neuron", "cpu", "openvino",
+                                "tpu", "xpu"
+                            ],
+                            help='Device type for vLLM execution.')
 
         # Related to Vision-language models such as llava
         parser = EngineArgs.add_cli_args_for_vlm(parser)
