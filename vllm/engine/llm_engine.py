@@ -20,7 +20,7 @@ from vllm.engine.output_processor.stop_checker import StopChecker
 from vllm.engine.output_processor.util import create_output_by_sequence_group
 from vllm.executor.executor_base import ExecutorBase
 from vllm.executor.ray_utils import initialize_ray_cluster
-from vllm.inputs import LLMInputs, PromptInputs
+from vllm.inputs import INPUT_REGISTRY, LLMInputs, PromptInputs
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.outputs import (EmbeddingRequestOutput, RequestOutput,
@@ -229,6 +229,9 @@ class LLMEngine:
         self.seq_counter = Counter()
         self.generation_config_fields = _load_generation_config_dict(
             model_config)
+
+        self.input_processor = INPUT_REGISTRY.create_input_processor(
+            self.model_config)
 
         self.model_executor = executor_class(
             model_config=model_config,
