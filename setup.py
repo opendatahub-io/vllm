@@ -6,7 +6,7 @@ import re
 import subprocess
 import sys
 from shutil import which
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import torch
 from packaging.version import Version, parse
@@ -233,6 +233,10 @@ def _is_cpu() -> bool:
     return VLLM_TARGET_DEVICE == "cpu"
 
 
+def _is_openvino() -> bool:
+    return VLLM_TARGET_DEVICE == "openvino"
+
+
 def _is_xpu() -> bool:
     return VLLM_TARGET_DEVICE == "xpu"
 
@@ -337,6 +341,8 @@ def get_vllm_version() -> str:
         if neuron_version != MAIN_CUDA_VERSION:
             neuron_version_str = neuron_version.replace(".", "")[:3]
             version += f"+neuron{neuron_version_str}"
+    elif _is_openvino():
+        version += "+openvino"
     elif _is_tpu():
         version += "+tpu"
     elif _is_cpu():
@@ -388,6 +394,8 @@ def get_requirements() -> List[str]:
         requirements = _read_requirements("requirements-rocm.txt")
     elif _is_neuron():
         requirements = _read_requirements("requirements-neuron.txt")
+    elif _is_openvino():
+        requirements = _read_requirements("requirements-openvino.txt")
     elif _is_tpu():
         requirements = _read_requirements("requirements-tpu.txt")
     elif _is_cpu():
@@ -396,8 +404,23 @@ def get_requirements() -> List[str]:
         requirements = _read_requirements("requirements-xpu.txt")
     else:
         raise ValueError(
-            "Unsupported platform, please use CUDA, ROCm, Neuron, or CPU.")
+            "Unsupported platform, please use CUDA, ROCm, Neuron, "
+            "OpenVINO, or CPU.")
     return requirements
+
+
+def get_extra_requirements() -> Optional[Dict[str, List[str]]]:
+    extras = {"tensorizer": ["tensorizer>=2.9.0"]}
+    if _is_cuda():
+        extras["ray"] = ["ray>=2.9"]
+    elif _is_hip():
+        extras["ray"] = ["ray==2.9.3"]
+    elif _is_neuron() or _is_cpu():
+        pass
+    else:
+        raise ValueError(
+            "Unsupported platform, please use CUDA, ROCM or Neuron.")
+    return extras
 
 
 ext_modules = []
@@ -423,8 +446,10 @@ setup(
     version=get_vllm_version(),
     author="vLLM Team",
     license="Apache 2.0",
-    description=("A high-throughput and memory-efficient inference and "
-                 "serving engine for LLMs"),
+    description=(
+        "A high-throughput and memory-efficient inference and "
+        "serving engine for LLMs"
+    ),
     long_description=read_readme(),
     long_description_content_type="text/markdown",
     url="https://github.com/vllm-project/vllm",
@@ -440,14 +465,13 @@ setup(
         "License :: OSI Approved :: Apache Software License",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
-    packages=find_packages(exclude=("benchmarks", "csrc", "docs", "examples",
-                                    "tests*")),
+    packages=find_packages(
+        exclude=("benchmarks", "csrc", "docs", "examples", "tests*")
+    ),
     python_requires=">=3.8",
     install_requires=get_requirements(),
     ext_modules=ext_modules,
-    extras_require={
-        "tensorizer": ["tensorizer>=2.9.0"],
-    },
+    extras_require=get_extra_requirements(),
     cmdclass={"build_ext": cmake_build_ext} if _build_custom_ops() else {},
     package_data=package_data,
 )

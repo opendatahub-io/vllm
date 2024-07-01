@@ -142,7 +142,7 @@ RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 # install vllm wheel first, so that torch etc will be installed
 RUN --mount=type=bind,from=build,src=/workspace/dist,target=/vllm-workspace/dist \
     --mount=type=cache,target=/root/.cache/pip \
-    python3 -m pip install dist/*.whl --verbose
+    pip install "$(echo dist/*.whl)[ray]" --verbose
 #################### vLLM installation IMAGE ####################
 
 
@@ -172,7 +172,7 @@ FROM vllm-base AS vllm-openai
 
 # install additional dependencies for openai api server
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install accelerate hf_transfer modelscope
+    pip install accelerate hf_transfer 'modelscope!=1.15.0'
 
 ENV VLLM_USAGE_SOURCE production-docker-image
 
