@@ -469,6 +469,6 @@ setup(
     install_requires=get_requirements(),
     ext_modules=ext_modules,
     extras_require=get_extra_requirements(),
-    cmdclass={"build_ext": cmake_build_ext} if not _is_neuron() else {},
+    cmdclass={"build_ext": cmake_build_ext} if _build_custom_ops() else {},
     package_data=package_data,
 )
