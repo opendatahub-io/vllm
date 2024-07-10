@@ -167,11 +167,12 @@ jobs:
     UPLOAD:
         needs: [TEST, BENCHMARK, LM-EVAL]
         if: ${{ inputs.push_to_pypi }}
-        uses: ./.github/workflows/nm-upload-assets-to-gcp.yml
+        uses: ./.github/workflows/nm-upload-assets.yml
         with:
             label: gcp-k8s-util
             timeout: ${{ inputs.build_timeout }}
             gitref: ${{ github.ref }}
+            wf_category: ${{ inputs.wf_category }}
         secrets: inherit
 
     # update docker
