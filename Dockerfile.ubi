@@ -192,9 +192,9 @@ FROM vllm-openai as vllm-grpc-adapter
 
 USER root
 
-# Installing from branch of vllm-tgis-adapter with not-yet-merged fixes
+# Installing from main of vllm-tgis-adapter with required fixes
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install git+https://github.com/opendatahub-io/vllm-tgis-adapter@block-pp-seed
+    pip install git+https://github.com/opendatahub-io/vllm-tgis-adapter@main
 
 ENV GRPC_PORT=8033
 USER 2000
