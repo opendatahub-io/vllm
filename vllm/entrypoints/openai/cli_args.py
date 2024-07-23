@@ -128,6 +128,11 @@ def make_arg_parser(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
         "using @app.middleware('http'). "
         "If a class is provided, vLLM will add it to the server "
         "using app.add_middleware(). ")
+    parser.add_argument("--keep-alive-on-engine-death",
+                        action="store_true",
+                        help="The default behavior is to stop the server "
+                        "process when the LLM engine dies. Set this flag to "
+                        "keep the server up instead.")
 
     parser = AsyncEngineArgs.add_cli_args(parser)
 

@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import importlib
 import inspect
 import re
@@ -17,7 +18,7 @@ from starlette.routing import Mount
 
 import vllm.envs as envs
 from vllm.engine.arg_utils import AsyncEngineArgs
-from vllm.engine.async_llm_engine import AsyncLLMEngine
+from vllm.engine.async_llm_engine import AsyncEngineDeadError, AsyncLLMEngine
 from vllm.entrypoints.logger import RequestLogger
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 # yapf conflicts with isort for this block
@@ -43,6 +44,7 @@ from vllm.version import __version__ as VLLM_VERSION
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
+server: uvicorn.Server
 engine: AsyncLLMEngine
 engine_args: AsyncEngineArgs
 openai_serving_chat: OpenAIServingChat
@@ -185,6 +187,35 @@ def build_app(args):
         return JSONResponse(err.model_dump(),
                             status_code=HTTPStatus.BAD_REQUEST)
 
+    @app.exception_handler(RuntimeError)
+    async def runtime_error_handler(_, __):
+        """On generic runtime error, check to see if the engine has died.
+        It probably has, in which case the server will no longer be able to
+        handle requests. Trigger a graceful shutdown with a SIGTERM."""
+        if (not args.keep_alive_on_engine_death and engine.errored
+                and not engine.is_running):
+            logger.fatal("AsyncLLMEngine has failed, terminating server "
+                         "process")
+            # See discussions here on shutting down a uvicorn server
+            # https://github.com/encode/uvicorn/discussions/1103
+            # In this case we cannot await the server shutdown here because
+            # this handler must first return to close the connection for
+            # this request.
+            server.should_exit = True
+
+        return Response(status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    @app.exception_handler(AsyncEngineDeadError)
+    async def engine_dead_handler(_, __):
+        """Kill the server if the async engine is already dead. It will
+        not handle any further requests."""
+        if not args.keep_alive_on_engine_death:
+            logger.fatal("AsyncLLMEngine is already dead, terminating server "
+                         "process")
+            server.should_exit = True
+
+        return Response(status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
+
     if token := envs.VLLM_API_KEY or args.api_key:
 
         @app.middleware("http")
@@ -296,15 +327,24 @@ def run_server(args, llm_engine=None):
         methods = ', '.join(route.methods)
         logger.info("Route: %s, Methods: %s", route.path, methods)
 
-    uvicorn.run(app,
-                host=args.host,
-                port=args.port,
-                log_level=args.uvicorn_log_level,
-                timeout_keep_alive=TIMEOUT_KEEP_ALIVE,
-                ssl_keyfile=args.ssl_keyfile,
-                ssl_certfile=args.ssl_certfile,
-                ssl_ca_certs=args.ssl_ca_certs,
-                ssl_cert_reqs=args.ssl_cert_reqs)
+    # Configure and build the uvicorn server
+    # See `uvicorn.run()` for reference
+    uvicorn_config = uvicorn.Config(app,
+                                    host=args.host,
+                                    port=args.port,
+                                    log_level=args.uvicorn_log_level,
+                                    timeout_keep_alive=TIMEOUT_KEEP_ALIVE,
+                                    ssl_keyfile=args.ssl_keyfile,
+                                    ssl_certfile=args.ssl_certfile,
+                                    ssl_ca_certs=args.ssl_ca_certs,
+                                    ssl_cert_reqs=args.ssl_cert_reqs)
+
+    global server
+    server = uvicorn.Server(config=uvicorn_config)
+
+    # Run the server and block until it exits
+    with contextlib.suppress(KeyboardInterrupt):
+        server.run()
 
 
 if __name__ == "__main__":
