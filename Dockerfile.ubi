@@ -32,7 +32,9 @@ ENV VIRTUAL_ENV=/opt/vllm
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 RUN microdnf install -y \
     python${PYTHON_VERSION}-devel python${PYTHON_VERSION}-pip python${PYTHON_VERSION}-wheel && \
-    python${PYTHON_VERSION} -m venv $VIRTUAL_ENV && pip install --no-cache -U pip wheel && microdnf clean all
+    python${PYTHON_VERSION} -m venv --system-site-packages $VIRTUAL_ENV && \
+    pip install --no-cache -U pip wheel && \
+    microdnf clean all
 
 
 ## CUDA Base ###################################################################
