@@ -11,6 +11,7 @@ from vllm.model_executor.layers.fused_moe import (FusedMoE, FusedMoEMethodBase,
 from vllm.model_executor.layers.linear import LinearBase, LinearMethodBase
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase)
+from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 from vllm.model_executor.layers.quantization.utils.marlin_utils_fp8 import (
     apply_fp8_marlin_linear, prepare_fp8_layer_for_marlin)
 from vllm.model_executor.layers.quantization.utils.w8a8_utils import (
@@ -66,8 +67,8 @@ class Fp8Config(QuantizationConfig):
         return cls(is_checkpoint_fp8_serialized=is_checkpoint_fp8_serialized,
                    activation_scheme=activation_scheme)
 
-    def get_quant_method(
-            self, layer: torch.nn.Module) -> Optional["QuantizeMethodBase"]:
+    def get_quant_method(self, layer: torch.nn.Module,
+                         prefix: str) -> Optional["QuantizeMethodBase"]:
         from vllm.attention.layer import Attention  # Avoid circular import
 
         if isinstance(layer, LinearBase):
@@ -214,7 +215,8 @@ class Fp8LinearMethod(LinearMethodBase):
             weight_scale=layer.weight_scale,
             input_scale=layer.input_scale,
             bias=bias,
-            cutlass_fp8_supported=self.cutlass_fp8_supported)
+            cutlass_fp8_supported=self.cutlass_fp8_supported,
+            use_per_token_if_dynamic=False)
 
 
 class Fp8MoEMethod(FusedMoEMethodBase):
@@ -399,39 +401,10 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                          topk_group=topk_group)
 
 
-class Fp8KVCacheMethod(QuantizeMethodBase):
-    """Supports loading kv-cache scaling factors from FP8 checkpoints.
+class Fp8KVCacheMethod(BaseKVCacheMethod):
+    """
+    Supports loading kv-cache scaling factors from FP8 checkpoints.
     """
 
     def __init__(self, quant_config: Fp8Config):
-        self.quant_config = quant_config
-
-    def create_weights(self, layer: torch.nn.Module):
-        """Create "weight" (aka kv_scale) for an attention layer.
-
-        Args:
-            layer: The layer that is using the QuantizeMethodBase factory.
-        """
-        # Initialize the KV cache scale to 1.0 as the default value.
-        # If the kv_scale appears in the checkpoint, it will be
-        # overwritten when loading weights.
-        layer.kv_scale = Parameter(torch.tensor(1.0), requires_grad=False)
-
-    def apply(self, layer: torch.nn.Module) -> torch.Tensor:
-        raise RuntimeError("Fp8KVCacheMethod.apply should not be called.")
-
-    def process_weights_after_loading(self, layer: Module) -> None:
-        # If the kv-cache dtype is auto, we enforce the kv-scale to be 1.0
-        # regardless whether the kv-scale is available in the checkpoint.
-        if layer.kv_cache_dtype != "auto":
-            kv_scale = layer.kv_scale.to("cpu").tolist()
-            if not isinstance(kv_scale, float):
-                raise ValueError("Only support per-tensor scaling factor "
-                                 "for fp8 KV cache")
-            layer._kv_scale = kv_scale
-            if layer._kv_scale == 1.0 and "e5m2" not in layer.kv_cache_dtype:
-                print_warning_once(
-                    "Using KV cache scaling factor 1.0 for fp8_e4m3. This may "
-                    "cause accuracy issues. Please make sure kv-cache scaling "
-                    "factor is available in the fp8 checkpoint.")
-        del layer.kv_scale
+        super().__init__(quant_config)
