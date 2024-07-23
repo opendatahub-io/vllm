@@ -32,7 +32,8 @@ from vllm.model_executor.model_loader.weight_utils import (
     filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
     get_quant_config, initialize_dummy_weights, np_cache_weights_iterator,
     pt_weights_iterator, safetensors_weights_iterator)
-from vllm.model_executor.models.interfaces import (supports_lora,
+from vllm.model_executor.models.interfaces import (has_inner_state,
+                                                   supports_lora,
                                                    supports_vision)
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
@@ -66,10 +67,10 @@ def _get_quantization_config(
 
 
 def _get_model_initialization_kwargs(
-    model_class: Type[nn.Module],
-    lora_config: Optional[LoRAConfig],
-    multimodal_config: Optional[MultiModalConfig],
-) -> Dict[str, Any]:
+        model_class: Type[nn.Module],
+        lora_config: Optional[LoRAConfig],
+        multimodal_config: Optional[MultiModalConfig],
+        scheduler_config: Optional[SchedulerConfig] = None) -> Dict[str, Any]:
     """Get extra kwargs for model initialization."""
     extra_kwargs: Dict[str, Any] = {}
 
@@ -90,13 +91,19 @@ def _get_model_initialization_kwargs(
 
         extra_kwargs["multimodal_config"] = multimodal_config
 
+    if has_inner_state(model_class) and scheduler_config:
+        extra_kwargs["scheduler_config"] = scheduler_config
+
     return extra_kwargs
 
 
-def _initialize_model(model_config: ModelConfig, load_config: LoadConfig,
-                      lora_config: Optional[LoRAConfig],
-                      multimodal_config: Optional[MultiModalConfig],
-                      cache_config: CacheConfig) -> nn.Module:
+def _initialize_model(
+        model_config: ModelConfig,
+        load_config: LoadConfig,
+        lora_config: Optional[LoRAConfig],
+        multimodal_config: Optional[MultiModalConfig],
+        cache_config: CacheConfig,
+        scheduler_config: Optional[SchedulerConfig] = None) -> nn.Module:
     """Initialize a model with the given configurations."""
     model_class = get_model_architecture(model_config)[0]
     quant_config = _get_quantization_config(model_config, load_config)
@@ -105,7 +112,8 @@ def _initialize_model(model_config: ModelConfig, load_config: LoadConfig,
                        cache_config=cache_config,
                        quant_config=quant_config,
                        **_get_model_initialization_kwargs(
-                           model_class, lora_config, multimodal_config))
+                           model_class, lora_config, multimodal_config,
+                           scheduler_config))
 
 
 class BaseModelLoader(ABC):
@@ -153,6 +161,7 @@ class DefaultModelLoader(BaseModelLoader):
                     cache_dir=self.load_config.download_dir,
                     local_files_only=huggingface_hub.constants.HF_HUB_OFFLINE,
                     revision=revision,
+                    ignore_patterns=self.load_config.ignore_patterns,
                 )
             else:
                 model_path = model
@@ -188,9 +197,13 @@ class DefaultModelLoader(BaseModelLoader):
             allow_patterns += ["*.pt"]
 
         if not is_local:
-            hf_folder = download_weights_from_hf(model_name_or_path,
-                                                 self.load_config.download_dir,
-                                                 allow_patterns, revision)
+            hf_folder = download_weights_from_hf(
+                model_name_or_path,
+                self.load_config.download_dir,
+                allow_patterns,
+                revision,
+                ignore_patterns=self.load_config.ignore_patterns,
+            )
         else:
             hf_folder = model_name_or_path
 
@@ -266,7 +279,7 @@ class DefaultModelLoader(BaseModelLoader):
             with torch.device(device_config.device):
                 model = _initialize_model(model_config, self.load_config,
                                           lora_config, multimodal_config,
-                                          cache_config)
+                                          cache_config, scheduler_config)
             model.load_weights(
                 self._get_weights_iterator(model_config.model,
                                            model_config.revision,
@@ -279,10 +292,6 @@ class DefaultModelLoader(BaseModelLoader):
                 quant_method = getattr(module, "quant_method", None)
                 if quant_method is not None:
                     quant_method.process_weights_after_loading(module)
-                # FIXME: Remove this after Mixtral is updated
-                # to use quant_method.
-                if hasattr(module, "process_weights_after_loading"):
-                    module.process_weights_after_loading()
         return model.eval()
 
 
@@ -306,7 +315,7 @@ class DummyModelLoader(BaseModelLoader):
             with torch.device(device_config.device):
                 model = _initialize_model(model_config, self.load_config,
                                           lora_config, multimodal_config,
-                                          cache_config)
+                                          cache_config, scheduler_config)
             # NOTE(woosuk): For accurate performance evaluation, we assign
             # random values to the weights.
             initialize_dummy_weights(model)
@@ -485,9 +494,13 @@ class ShardedStateLoader(BaseModelLoader):
             return model_name_or_path
         else:
             allow_patterns = ["*.safetensors"]
-            return download_weights_from_hf(model_name_or_path,
-                                            self.load_config.download_dir,
-                                            allow_patterns, revision)
+            return download_weights_from_hf(
+                model_name_or_path,
+                self.load_config.download_dir,
+                allow_patterns,
+                revision,
+                ignore_patterns=self.load_config.ignore_patterns,
+            )
 
     def load_model(self, *, model_config: ModelConfig,
                    device_config: DeviceConfig,
@@ -659,8 +672,12 @@ class BitsAndBytesModelLoader(BaseModelLoader):
                 matching_files = fnmatch.filter(repo_files, pattern)
                 if matching_files:
                     hf_folder = download_weights_from_hf(
-                        model_name_or_path, self.load_config.download_dir,
-                        [pattern], revision)
+                        model_name_or_path,
+                        self.load_config.download_dir,
+                        [pattern],
+                        revision,
+                        ignore_patterns=self.load_config.ignore_patterns,
+                    )
                     return glob.glob(os.path.join(hf_folder, pattern)), pattern
 
         raise RuntimeError(
