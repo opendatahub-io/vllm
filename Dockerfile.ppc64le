@@ -1,4 +1,5 @@
-FROM mambaorg/micromamba
+# Stage 1: Build Stage with Micromamba
+FROM mambaorg/micromamba AS builder
 ARG MAMBA_DOCKERFILE_ACTIVATE=1
 USER root
 
@@ -16,7 +17,32 @@ WORKDIR /workspace/vllm
 # These packages will be in rocketce eventually
 RUN pip install -v -r requirements-cpu.txt --prefer-binary --extra-index-url https://repo.fury.io/mgiessing
 
+# Build the application
 RUN VLLM_TARGET_DEVICE=cpu python3 setup.py install
 
+# Stage 2: Final Stage with UBI 9
+FROM registry.access.redhat.com/ubi9/ubi:latest
+USER root
+
+# Copy necessary files from the builder stage
+COPY --from=builder /opt/conda /opt/conda
+COPY --from=builder /workspace/vllm /workspace/vllm
+
+# Set the working directory for runtime
 WORKDIR /vllm-workspace
+
+# Set up the environment for the non-root user
+RUN umask 002 \
+    && mkdir -p /home/vllm \
+    && useradd --uid 2000 --gid 0 vllm \
+    && chmod g+rwx $HOME /usr/src /vllm-workspace
+
+# Set environment variables
+ENV HF_HUB_OFFLINE=1 \
+    PORT=8000 \
+    HOME=/home/vllm \
+    VLLM_USAGE_SOURCE=production-docker-image \
+    VLLM_WORKER_MULTIPROC_METHOD=fork
+
+# Define the entrypoint for the container
 ENTRYPOINT ["/opt/conda/bin/python3", "-m", "vllm.entrypoints.openai.api_server"]
