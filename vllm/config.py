@@ -175,6 +175,8 @@ class ModelConfig:
 
         if not self.skip_tokenizer_init:
             self._verify_tokenizer_mode()
+
+        self._set_missing_architectures()
         self._verify_embedding_mode()
         self._verify_quantization()
         self._verify_cuda_graph()
@@ -186,6 +188,35 @@ class ModelConfig:
                 f"Unknown tokenizer mode: {self.tokenizer_mode}. Must be "
                 "either 'auto' or 'slow'.")
         self.tokenizer_mode = tokenizer_mode
+
+    def _set_missing_architectures(self) -> None:
+        has_architectures = hasattr(self.hf_config, "architectures")
+        if not has_architectures:
+            # this case is handled because architectures is always accessed like this:
+            #    architectures = getattr(self.hf_config, "architectures", [])
+            return
+
+        if self.hf_config.architectures:
+            # architectures are set, no action needed
+            return
+
+        logger.warning(
+            "Model config has an empty `architectures` field, will try to guess from model_type"
+        )
+
+        from transformers.models.auto.modeling_auto import MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
+
+        model_type = self.hf_config.model_type
+
+        try:
+            architecture = MODEL_FOR_CAUSAL_LM_MAPPING_NAMES[model_type]
+        except KeyError as exc:
+            raise ValueError(f"Cannot infer model architecture from {model_type=}") from exc
+
+        logger.warning(
+            "Guessed architecture %s for model_type=%s", architecture, model_type,)
+
+        self.hf_config.architectures = [architecture]
 
     def _verify_embedding_mode(self) -> None:
         architectures = getattr(self.hf_config, "architectures", [])
