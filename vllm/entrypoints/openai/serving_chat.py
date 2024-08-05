@@ -1,6 +1,5 @@
 import time
-from typing import (AsyncGenerator, AsyncIterator, Awaitable, Dict, List,
-                    Optional)
+from typing import AsyncGenerator, AsyncIterator, Dict, List, Optional
 from typing import Sequence as GenericSequence
 from typing import Union
 
@@ -8,10 +7,10 @@ from fastapi import Request
 from transformers import PreTrainedTokenizer
 
 from vllm.config import ModelConfig
-from vllm.engine.async_llm_engine import AsyncLLMEngine
+from vllm.engine.protocol import AsyncEngineClient
 from vllm.entrypoints.chat_utils import (ConversationMessage,
                                          load_chat_template,
-                                         parse_chat_message_content)
+                                         parse_chat_messages)
 from vllm.entrypoints.logger import RequestLogger
 from vllm.entrypoints.openai.protocol import (
     ChatCompletionLogProb, ChatCompletionLogProbs,
@@ -39,7 +38,7 @@ class OpenAIServingChat(OpenAIServing):
 
     def __init__(
         self,
-        engine: AsyncLLMEngine,
+        async_engine_client: AsyncEngineClient,
         model_config: ModelConfig,
         served_model_names: List[str],
         response_role: str,
@@ -48,13 +47,15 @@ class OpenAIServingChat(OpenAIServing):
         prompt_adapters: Optional[List[PromptAdapterPath]],
         request_logger: Optional[RequestLogger],
         chat_template: Optional[str],
+        return_tokens_as_token_ids: bool = False,
     ):
-        super().__init__(engine=engine,
+        super().__init__(async_engine_client=async_engine_client,
                          model_config=model_config,
                          served_model_names=served_model_names,
                          lora_modules=lora_modules,
                          prompt_adapters=prompt_adapters,
-                         request_logger=request_logger)
+                         request_logger=request_logger,
+                         return_tokens_as_token_ids=return_tokens_as_token_ids)
 
         self.response_role = response_role
 
@@ -87,17 +88,11 @@ class OpenAIServingChat(OpenAIServing):
             ) = self._maybe_get_adapters(request)
 
             model_config = self.model_config
-            tokenizer = await self.engine.get_tokenizer(lora_request)
+            tokenizer = await self.async_engine_client.get_tokenizer(
+                lora_request)
 
-            conversation: List[ConversationMessage] = []
-            mm_futures: List[Awaitable[MultiModalDataDict]] = []
-
-            for msg in request.messages:
-                chat_parsed_result = parse_chat_message_content(
-                    msg, model_config, tokenizer)
-
-                conversation.extend(chat_parsed_result.messages)
-                mm_futures.extend(chat_parsed_result.mm_futures)
+            conversation, mm_futures = parse_chat_messages(
+                request.messages, model_config, tokenizer)
 
             tool_dicts = None if request.tools is None else [
                 tool.model_dump() for tool in request.tools
@@ -112,6 +107,7 @@ class OpenAIServingChat(OpenAIServing):
                 chat_template=request.chat_template or self.chat_template,
                 **(request.chat_template_kwargs or {}),
             )
+            assert isinstance(prompt, str)
         except Exception as e:
             logger.error("Error in applying chat template from request: %s", e)
             return self.create_error_response(str(e))
@@ -159,7 +155,8 @@ class OpenAIServingChat(OpenAIServing):
             if mm_data is not None:
                 engine_inputs["multi_modal_data"] = mm_data
 
-            is_tracing_enabled = await self.engine.is_tracing_enabled()
+            is_tracing_enabled = (
+                await self.async_engine_client.is_tracing_enabled())
             trace_headers = None
             if is_tracing_enabled and raw_request:
                 trace_headers = extract_trace_headers(raw_request.headers)
@@ -167,7 +164,7 @@ class OpenAIServingChat(OpenAIServing):
                     and contains_trace_headers(raw_request.headers)):
                 log_tracing_disabled_warning()
 
-            result_generator = self.engine.generate(
+            result_generator = self.async_engine_client.generate(
                 engine_inputs,
                 sampling_params,
                 request_id,
@@ -240,7 +237,15 @@ class OpenAIServingChat(OpenAIServing):
                             model=model_name)
                         if (request.stream_options
                                 and request.stream_options.include_usage):
-                            chunk.usage = None
+                            if (request.stream_options.continuous_usage_stats):
+                                prompt_tokens = len(res.prompt_token_ids)
+                                usage = UsageInfo(prompt_tokens=prompt_tokens,
+                                                  completion_tokens=0,
+                                                  total_tokens=prompt_tokens)
+                                chunk.usage = usage
+                            else:
+                                chunk.usage = None
+
                         data = chunk.model_dump_json(exclude_unset=True)
                         yield f"data: {data}\n\n"
 
@@ -270,7 +275,18 @@ class OpenAIServingChat(OpenAIServing):
                                     model=model_name)
                                 if (request.stream_options and
                                         request.stream_options.include_usage):
-                                    chunk.usage = None
+                                    if (request.stream_options.
+                                            continuous_usage_stats):
+                                        prompt_tokens = len(
+                                            res.prompt_token_ids)
+                                        usage = UsageInfo(
+                                            prompt_tokens=prompt_tokens,
+                                            completion_tokens=0,
+                                            total_tokens=prompt_tokens)
+                                        chunk.usage = usage
+                                    else:
+                                        chunk.usage = None
+
                                 data = chunk.model_dump_json(
                                     exclude_unset=True)
                                 yield f"data: {data}\n\n"
@@ -329,7 +345,19 @@ class OpenAIServingChat(OpenAIServing):
                             model=model_name)
                         if (request.stream_options
                                 and request.stream_options.include_usage):
-                            chunk.usage = None
+                            if (request.stream_options.continuous_usage_stats):
+                                prompt_tokens = len(res.prompt_token_ids)
+                                completion_tokens = len(output.token_ids)
+                                usage = UsageInfo(
+                                    prompt_tokens=prompt_tokens,
+                                    completion_tokens=completion_tokens,
+                                    total_tokens=prompt_tokens +
+                                    completion_tokens,
+                                )
+                                chunk.usage = usage
+                            else:
+                                chunk.usage = None
+
                         data = chunk.model_dump_json(exclude_unset=True)
                         yield f"data: {data}\n\n"
                     else:
@@ -349,7 +377,18 @@ class OpenAIServingChat(OpenAIServing):
                             model=model_name)
                         if (request.stream_options
                                 and request.stream_options.include_usage):
-                            chunk.usage = None
+                            if (request.stream_options.continuous_usage_stats):
+                                prompt_tokens = len(res.prompt_token_ids)
+                                completion_tokens = len(output.token_ids)
+                                usage = UsageInfo(
+                                    prompt_tokens=prompt_tokens,
+                                    completion_tokens=completion_tokens,
+                                    total_tokens=prompt_tokens +
+                                    completion_tokens,
+                                )
+                                chunk.usage = usage
+                            else:
+                                chunk.usage = None
                         data = chunk.model_dump_json(exclude_unset=True)
                         yield f"data: {data}\n\n"
                         finish_reason_sent[i] = True
@@ -397,7 +436,7 @@ class OpenAIServingChat(OpenAIServing):
         async for res in result_generator:
             if raw_request is not None and await raw_request.is_disconnected():
                 # Abort the request if the client disconnects.
-                await self.engine.abort(request_id)
+                await self.async_engine_client.abort(request_id)
                 return self.create_error_response("Client disconnected")
             final_res = res
         assert final_res is not None
@@ -473,11 +512,14 @@ class OpenAIServingChat(OpenAIServing):
             self, logprobs: Dict[int, Logprob], top_logprobs: Optional[int],
             tokenizer: PreTrainedTokenizer) -> List[ChatCompletionLogProb]:
         return [
-            ChatCompletionLogProb(
-                token=(token := self._get_decoded_token(p[1], p[0],
-                                                        tokenizer)),
-                logprob=max(p[1].logprob, -9999.0),
-                bytes=list(token.encode("utf-8", errors="replace")))
+            ChatCompletionLogProb(token=(token := self._get_decoded_token(
+                p[1],
+                p[0],
+                tokenizer,
+                return_as_token_id=self.return_tokens_as_token_ids)),
+                                  logprob=max(p[1].logprob, -9999.0),
+                                  bytes=list(
+                                      token.encode("utf-8", errors="replace")))
             for i, p in enumerate(logprobs.items())
             if top_logprobs and i < top_logprobs
         ]
@@ -497,6 +539,8 @@ class OpenAIServingChat(OpenAIServing):
             step_top_logprobs = top_logprobs[i]
             if step_top_logprobs is None:
                 token = tokenizer.decode(token_id)
+                if self.return_tokens_as_token_ids:
+                    token = f"token_id:{token_id}"
                 logprobs_content.append(
                     ChatCompletionLogProbsContent(
                         token=token,
@@ -504,7 +548,9 @@ class OpenAIServingChat(OpenAIServing):
             else:
                 logprobs_content.append(
                     ChatCompletionLogProbsContent(
-                        token=step_top_logprobs[token_id].decoded_token,
+                        token=self._get_decoded_token(
+                            step_top_logprobs[token_id], token_id, tokenizer,
+                            self.return_tokens_as_token_ids),
                         logprob=max(step_top_logprobs[token_id].logprob,
                                     -9999.0),
                         bytes=list(

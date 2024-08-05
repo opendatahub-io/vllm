@@ -8,7 +8,7 @@ from fastapi import Request
 from transformers import PreTrainedTokenizer
 
 from vllm.config import ModelConfig
-from vllm.engine.async_llm_engine import AsyncLLMEngine
+from vllm.engine.protocol import AsyncEngineClient
 from vllm.entrypoints.logger import RequestLogger
 # yapf conflicts with isort for this block
 # yapf: disable
@@ -42,20 +42,22 @@ class OpenAIServingCompletion(OpenAIServing):
 
     def __init__(
         self,
-        engine: AsyncLLMEngine,
+        async_engine_client: AsyncEngineClient,
         model_config: ModelConfig,
         served_model_names: List[str],
         *,
         lora_modules: Optional[List[LoRAModulePath]],
         prompt_adapters: Optional[List[PromptAdapterPath]],
         request_logger: Optional[RequestLogger],
+        return_tokens_as_token_ids: bool = False,
     ):
-        super().__init__(engine=engine,
+        super().__init__(async_engine_client=async_engine_client,
                          model_config=model_config,
                          served_model_names=served_model_names,
                          lora_modules=lora_modules,
                          prompt_adapters=prompt_adapters,
-                         request_logger=request_logger)
+                         request_logger=request_logger,
+                         return_tokens_as_token_ids=return_tokens_as_token_ids)
 
     async def create_completion(self, request: CompletionRequest,
                                 raw_request: Request):
@@ -89,7 +91,8 @@ class OpenAIServingCompletion(OpenAIServing):
                 prompt_adapter_request,
             ) = self._maybe_get_adapters(request)
 
-            tokenizer = await self.engine.get_tokenizer(lora_request)
+            tokenizer = await self.async_engine_client.get_tokenizer(
+                lora_request)
 
             guided_decode_logits_processor = (
                 await self._guided_decode_logits_processor(request, tokenizer))
@@ -117,7 +120,8 @@ class OpenAIServingCompletion(OpenAIServing):
                                  lora_request=lora_request,
                                  prompt_adapter_request=prompt_adapter_request)
 
-                is_tracing_enabled = await self.engine.is_tracing_enabled()
+                is_tracing_enabled = (
+                    await self.async_engine_client.is_tracing_enabled())
                 trace_headers = None
                 if is_tracing_enabled:
                     trace_headers = extract_trace_headers(raw_request.headers)
@@ -125,7 +129,7 @@ class OpenAIServingCompletion(OpenAIServing):
                         raw_request.headers):
                     log_tracing_disabled_warning()
 
-                generator = self.engine.generate(
+                generator = self.async_engine_client.generate(
                     {"prompt_token_ids": prompt_inputs["prompt_token_ids"]},
                     sampling_params,
                     request_id_item,
@@ -166,7 +170,7 @@ class OpenAIServingCompletion(OpenAIServing):
             async for i, res in result_generator:
                 if await raw_request.is_disconnected():
                     # Abort the request if the client disconnects.
-                    await self.engine.abort(f"{request_id}-{i}")
+                    await self.async_engine_client.abort(f"{request_id}-{i}")
                     return self.create_error_response("Client disconnected")
                 final_res_batch[i] = res
 
@@ -228,7 +232,8 @@ class OpenAIServingCompletion(OpenAIServing):
 
                 # Abort the request if the client disconnects.
                 if await raw_request.is_disconnected():
-                    await self.engine.abort(f"{request_id}-{prompt_idx}")
+                    await self.async_engine_client.abort(
+                        f"{request_id}-{prompt_idx}")
                     raise StopAsyncIteration()
 
                 for output in res.outputs:
@@ -421,12 +426,17 @@ class OpenAIServingCompletion(OpenAIServing):
             step_top_logprobs = top_logprobs[i]
             if step_top_logprobs is None:
                 token = tokenizer.decode(token_id)
+                if self.return_tokens_as_token_ids:
+                    token = f"token_id:{token_id}"
                 out_tokens.append(token)
                 out_token_logprobs.append(None)
                 out_top_logprobs.append(None)
             else:
-                token = self._get_decoded_token(step_top_logprobs[token_id],
-                                                token_id, tokenizer)
+                token = self._get_decoded_token(
+                    step_top_logprobs[token_id],
+                    token_id,
+                    tokenizer,
+                    return_as_token_id=self.return_tokens_as_token_ids)
                 token_logprob = max(step_top_logprobs[token_id].logprob,
                                     -9999.0)
                 out_tokens.append(token)
@@ -439,7 +449,11 @@ class OpenAIServingCompletion(OpenAIServing):
                 out_top_logprobs.append({
                     # Convert float("-inf") to the
                     # JSON-serializable float that OpenAI uses
-                    self._get_decoded_token(top_lp[1], top_lp[0], tokenizer):
+                    self._get_decoded_token(
+                        top_lp[1],
+                        top_lp[0],
+                        tokenizer,
+                        return_as_token_id=self.return_tokens_as_token_ids):
                     max(top_lp[1].logprob, -9999.0)
                     for i, top_lp in enumerate(step_top_logprobs.items())
                     if num_output_top_logprobs >= i
