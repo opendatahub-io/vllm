@@ -1,0 +1,151 @@
+ARG BASE_IMAGE="registry.access.redhat.com/ubi9/ubi:latest"
+
+FROM ${BASE_IMAGE} as rocm-base
+
+RUN echo "Base image is ${BASE_IMAGE}"
+
+RUN <<EOF
+cat <<EOD > /etc/yum.repos.d/amdgpu.repo
+[amdgpu]
+name=amdgpu
+baseurl=https://repo.radeon.com/amdgpu/6.1.2/rhel/9.4/main/x86_64/
+enabled=1
+priority=50
+gpgcheck=1
+gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
+
+[ROCm-6.1.2]
+name=ROCm6.1.2
+baseurl=https://repo.radeon.com/rocm/rhel9/6.1.2/main
+enabled=1
+priority=50
+gpgcheck=1
+gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
+EOD
+EOF
+
+RUN yum -y install https://mirror.stream.centos.org/9-stream/BaseOS/x86_64/os/Packages/centos-stream-repos-9.0-26.el9.noarch.rpm https://mirror.stream.centos.org/9-stream/BaseOS/x86_64/os/Packages/centos-gpg-keys-9.0-26.el9.noarch.rpm https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && crb enable && yum config-manager --set-enabled crb && yum clean all
+
+RUN yum -y install rocm hipcc && yum clean all
+
+FROM rocm-base as build
+
+ARG FA_GFX_ARCHS="gfx90a;gfx942"
+RUN echo "FA_GFX_ARCHS is $FA_GFX_ARCHS"
+
+ARG FA_BRANCH="ae7928c"
+RUN echo "FA_BRANCH is $FA_BRANCH"
+
+# whether to build flash-attention
+# if 0, will not build flash attention
+# this is useful for gfx target where flash-attention is not supported
+# In that case, we need to use the python reference attention implementation in vllm
+ARG BUILD_FA="1"
+
+# whether to build triton on rocm
+ARG BUILD_TRITON="1"
+
+# Install some basic utilities
+RUN yum -y install python3 python3-pip python3-devel patch
+
+# Install some basic utilities
+RUN yum -y install git bzip2 libX11-devel wget unzip https://mirror.stream.centos.org/9-stream/BaseOS/x86_64/os/Packages/tmux-3.2a-4.el9.x86_64.rpm && yum clean all
+
+### Mount Point ###
+# When launching the container, mount the code directory to /app
+ARG APP_MOUNT=/vllm-workspace
+# VOLUME [ "${APP_MOUNT}" ]
+WORKDIR ${APP_MOUNT}
+
+RUN python3 -m pip install --upgrade pip
+RUN python3 -m pip install --no-cache-dir fastapi ninja tokenizers pandas
+RUN python3 -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.0
+
+ENV LLVM_SYMBOLIZER_PATH=/opt/rocm/llvm/bin/llvm-symbolizer
+ENV PATH=$PATH:/opt/rocm/bin:/libtorch/bin:
+ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib/:/libtorch/lib:
+ENV CPLUS_INCLUDE_PATH=$CPLUS_INCLUDE_PATH:/libtorch/include:/libtorch/include/torch/csrc/api/include/:/opt/rocm/include/
+
+ENV BUILD_TARGET='rocm'
+
+# Install ROCm flash-attention
+RUN if [ "$BUILD_FA" = "1" ]; then \
+    mkdir libs \
+    && cd libs \
+    && git clone https://github.com/ROCm/flash-attention.git \
+    && cd flash-attention \
+    && git checkout ${FA_BRANCH} \
+    && git submodule update --init \
+    && export GPU_ARCHS=${FA_GFX_ARCHS} \
+    && python3 setup.py install \
+    && cd ..; \
+    fi
+
+# build triton
+RUN if [ "$BUILD_TRITON" = "1" ]; then \
+    mkdir -p libs \
+    && cd libs \
+    && pip uninstall -y triton \
+    && git clone https://github.com/ROCm/triton.git \
+    && cd triton/python \
+    && pip3 install . \
+    && cd ../..; \
+    fi
+
+WORKDIR /vllm-workspace
+COPY . .
+
+#RUN python3 -m pip install pynvml # to be removed eventually
+RUN python3 -m pip install --upgrade pip numba
+
+# make sure punica kernels are built (for LoRA)
+ENV VLLM_INSTALL_PUNICA_KERNELS=1
+# Workaround for ray >= 2.10.0
+ENV RAY_EXPERIMENTAL_NOSET_ROCR_VISIBLE_DEVICES=1
+
+ENV VLLM_NCCL_SO_PATH=/opt/rocm/lib/librccl.so
+
+RUN yum -y remove python3-requests
+
+ENV VLLM_TARGET_DEVICE="rocm"
+ENV VLLM_PYTHON_EXECUTABLE="/usr/bin/python3"
+
+ENV PYTORCH_ROCM_ARCH=${FA_GFX_ARCHS}
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -U -r requirements-rocm.txt \
+    && python3 setup.py install \
+    && cp build/lib.linux-x86_64-3.9/vllm/_C.abi3.so vllm/ \
+    && cp build/lib.linux-x86_64-3.9/vllm/_punica_C.abi3.so vllm/ \
+    && cp build/lib.linux-x86_64-3.9/vllm/_moe_C.abi3.so vllm/ \
+    && cd ..
+
+
+# FROM rocm-base as vllm-base
+
+# COPY --from=build /vllm /vllm
+
+#################### OPENAI API SERVER ####################
+# openai api server alternative
+FROM build AS vllm-openai
+
+# install additional dependencies for openai api server
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install accelerate hf_transfer modelscope
+
+ENV VLLM_USAGE_SOURCE production-docker-image
+
+ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+#################### OPENAI API SERVER ####################
+
+#################### TGIS API SERVER ####################
+FROM vllm-openai as vllm-grpc-adapter
+
+USER root
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install vllm-tgis-adapter==0.1.3
+
+ENV GRPC_PORT=8033
+ENTRYPOINT ["python3", "-m", "vllm_tgis_adapter", "--distributed-executor-backend=mp"]
+#################### TGIS API SERVER ####################
