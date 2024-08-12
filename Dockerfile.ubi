@@ -153,7 +153,7 @@ RUN curl -LO https://github.com/jedisct1/libsodium/releases/download/${LIBSODIUM
 RUN ./configure --prefix="/usr/" && make && make check
 
 ## Release #####################################################################
-FROM python-install AS vllm-openai
+FROM python-cuda-base AS vllm-openai
 
 WORKDIR /workspace
 
