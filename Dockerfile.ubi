@@ -8,8 +8,9 @@ ARG TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 8.9 9.0+PTX"
 FROM registry.access.redhat.com/ubi9/ubi-minimal:${BASE_UBI_IMAGE_TAG} as base
 ARG PYTHON_VERSION
 
-RUN microdnf install -y \
-    python${PYTHON_VERSION}-pip python${PYTHON_VERSION}-wheel \
+RUN --mount=type=cache,target=/var/cache/yum \
+    microdnf install -y \
+        python${PYTHON_VERSION}-pip python${PYTHON_VERSION}-wheel \
     && microdnf clean all
 
 WORKDIR /workspace
@@ -18,7 +19,8 @@ ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
 # Some utils for dev purposes - tar required for kubectl cp
-RUN microdnf install -y \
+RUN --mount=type=cache,target=/var/cache/yum \
+    microdnf install -y \
         which procps findutils tar vim git\
     && microdnf clean all
 
@@ -30,9 +32,12 @@ ARG PYTHON_VERSION
 
 ENV VIRTUAL_ENV=/opt/vllm
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
-RUN microdnf install -y \
-    python${PYTHON_VERSION}-devel python${PYTHON_VERSION}-pip python${PYTHON_VERSION}-wheel && \
-    python${PYTHON_VERSION} -m venv $VIRTUAL_ENV && pip install --no-cache -U pip wheel uv && microdnf clean all
+
+RUN --mount=type=cache,target=/var/cache/yum \
+    --mount=type=cache,target=/root/.cache/pip \
+    microdnf install -y \
+        python${PYTHON_VERSION}-devel python${PYTHON_VERSION}-pip python${PYTHON_VERSION}-wheel && \
+        python${PYTHON_VERSION} -m venv $VIRTUAL_ENV && pip install --no-cache -U pip wheel uv && microdnf clean all
 
 
 ## CUDA Base ###################################################################
@@ -41,7 +46,7 @@ FROM python-install as cuda-base
 RUN curl -Lo /etc/yum.repos.d/cuda-rhel9.repo \
         https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo
 
-RUN microdnf install -y \
+RUN --mount=type=cache,target=/var/cache/yum \
     microdnf install -y \
         cuda-nvcc-12-4 \
         cuda-nvtx-12-4 \
@@ -95,7 +100,11 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 # install compiler cache to speed up compilation leveraging local or remote caching
 # git is required for the cutlass kernels
-RUN rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && rpm -ql epel-release && microdnf install -y git ccache && microdnf clean all
+RUN rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    rpm -ql epel-release && \
+    microdnf install -y git ccache && \
+    microdnf clean all
+
 # install build dependencies
 
 # copy input files
