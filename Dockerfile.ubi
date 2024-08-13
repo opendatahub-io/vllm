@@ -42,7 +42,7 @@ RUN curl -Lo /etc/yum.repos.d/cuda-rhel9.repo \
         https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo
 
 RUN microdnf install -y \
-        cuda-nvcc-12-4 cuda-nvtx-12-4 cuda-libraries-devel-12-4 && \
+        cuda-nvcc-12-1 cuda-nvtx-12-1 cuda-libraries-devel-12-1 && \
     microdnf clean all
 
 ENV CUDA_HOME="/usr/local/cuda" \
