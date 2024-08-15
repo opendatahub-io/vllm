@@ -32,7 +32,7 @@ ENV VIRTUAL_ENV=/opt/vllm
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 RUN microdnf install -y \
     python${PYTHON_VERSION}-devel python${PYTHON_VERSION}-pip python${PYTHON_VERSION}-wheel && \
-    python${PYTHON_VERSION} -m venv $VIRTUAL_ENV && pip install --no-cache -U pip wheel && microdnf clean all
+    python${PYTHON_VERSION} -m venv $VIRTUAL_ENV && pip install --no-cache -U pip wheel uv && microdnf clean all
 
 
 ## CUDA Base ###################################################################
@@ -57,23 +57,26 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # install cuda and common dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=requirements-common.txt,target=requirements-common.txt \
     --mount=type=bind,source=requirements-cuda.txt,target=requirements-cuda.txt \
-    pip install \
+    uv pip install \
         -r requirements-cuda.txt
+
 
 ## Development #################################################################
 FROM python-cuda-base AS dev
 
 # install build and runtime dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=requirements-common.txt,target=requirements-common.txt \
     --mount=type=bind,source=requirements-cuda.txt,target=requirements-cuda.txt \
     --mount=type=bind,source=requirements-dev.txt,target=requirements-dev.txt \
     --mount=type=bind,source=requirements-lint.txt,target=requirements-lint.txt \
     --mount=type=bind,source=requirements-adag.txt,target=requirements-adag.txt \
     --mount=type=bind,source=requirements-test.txt,target=requirements-test.txt \
-    pip3 install \
+    uv pip install \
         -r requirements-cuda.txt \
         -r requirements-dev.txt
 
@@ -82,8 +85,9 @@ FROM dev AS build
 
 # install build dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=requirements-build.txt,target=requirements-build.txt \
-    pip install -r requirements-build.txt
+    uv pip install -r requirements-build.txt
 
 # install compiler cache to speed up compilation leveraging local or remote caching
 # git is required for the cutlass kernels
@@ -113,7 +117,6 @@ ENV VLLM_INSTALL_PUNICA_KERNELS=1
 
 # Make sure the cuda environment is in the PATH
 ENV PATH=/usr/local/cuda/bin:$PATH
-ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 
 # Copy the entire directory before building wheel
 COPY vllm vllm
@@ -121,6 +124,7 @@ COPY vllm vllm
 ENV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
     --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,src=.git,target=/workspace/.git \
     env CFLAGS="-march=haswell" \
         CXXFLAGS="$CFLAGS $CXXFLAGS" \
@@ -145,11 +149,17 @@ RUN ./configure --prefix="/usr/" && make && make check
 
 ## Release #####################################################################
 FROM python-install AS vllm-openai
+ARG PYTHON_VERSION
 
 WORKDIR /workspace
 
 ENV VIRTUAL_ENV=/opt/vllm
 ENV PATH=$VIRTUAL_ENV/bin/:$PATH
+
+# force using the python venv's cuda runtime libraries
+ENV LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib/python${PYTHON_VERSION}/site-packages/nvidia/cuda_nvrtc/lib:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib/python${PYTHON_VERSION}/site-packages/nvidia/cuda_runtime/lib:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib/python${PYTHON_VERSION}/site-packages/nvidia/nvtx/lib:${LD_LIBRARY_PATH}"
 
 # Triton needs a CC compiler
 RUN microdnf install -y gcc \
@@ -158,7 +168,8 @@ RUN microdnf install -y gcc \
 # install vllm wheel first, so that torch etc will be installed
 RUN --mount=type=bind,from=build,src=/workspace/dist,target=/workspace/dist \
     --mount=type=cache,target=/root/.cache/pip \
-    pip install $(echo dist/*.whl)'[tensorizer]' --verbose
+    --mount=type=cache,target=/root/.cache/uv \
+    uv pip install $(echo dist/*.whl)'[tensorizer]' --verbose
 
 # Install libsodium for Tensorizer encryption
 RUN --mount=type=bind,from=libsodium-builder,src=/usr/src/libsodium,target=/usr/src/libsodium \
@@ -166,7 +177,8 @@ RUN --mount=type=bind,from=libsodium-builder,src=/usr/src/libsodium,target=/usr/
     && make install
 
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install https://github.com/flashinfer-ai/flashinfer/releases/download/v0.0.9/flashinfer-0.0.9+cu121torch2.3-cp311-cp311-linux_x86_64.whl
+    --mount=type=cache,target=/root/.cache/uv \
+    uv pip install https://github.com/flashinfer-ai/flashinfer/releases/download/v0.1.2/flashinfer-0.1.2+cu121torch2.4-cp311-cp311-linux_x86_64.whl
 
 ENV HF_HUB_OFFLINE=1 \
     PORT=8000 \
@@ -190,7 +202,7 @@ FROM vllm-openai as vllm-grpc-adapter
 USER root
 
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install vllm-tgis-adapter==0.2.3
+    pip install vllm-tgis-adapter==0.3.0
 
 ENV GRPC_PORT=8033
 USER 2000
