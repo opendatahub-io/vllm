@@ -187,6 +187,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 ENV HF_HUB_OFFLINE=1 \
     PORT=8000 \
     HOME=/home/vllm \
+    # Allow requested max length to exceed what is extracted from the
+    # config.json
+    # see: https://github.com/vllm-project/vllm/pull/7080
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     VLLM_USAGE_SOURCE=production-docker-image \
     VLLM_WORKER_MULTIPROC_METHOD=fork
 
@@ -210,4 +214,4 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 ENV GRPC_PORT=8033
 USER 2000
-ENTRYPOINT ["python3", "-m", "vllm_tgis_adapter"]
+ENTRYPOINT ["python3", "-m", "vllm_tgis_adapter", "--uvicorn-log-level=warning"]
