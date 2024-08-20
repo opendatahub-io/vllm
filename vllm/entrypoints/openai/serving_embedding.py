@@ -1,6 +1,8 @@
+import asyncio
 import base64
 import time
-from typing import AsyncIterator, List, Optional, Tuple, cast
+from typing import (AsyncGenerator, AsyncIterator, List, Optional, Tuple,
+                    Union, cast)
 
 import numpy as np
 from fastapi import Request
@@ -10,7 +12,8 @@ from vllm.engine.protocol import AsyncEngineClient
 from vllm.entrypoints.logger import RequestLogger
 from vllm.entrypoints.openai.protocol import (EmbeddingRequest,
                                               EmbeddingResponse,
-                                              EmbeddingResponseData, UsageInfo)
+                                              EmbeddingResponseData,
+                                              ErrorResponse, UsageInfo)
 from vllm.entrypoints.openai.serving_engine import OpenAIServing
 from vllm.logger import init_logger
 from vllm.outputs import EmbeddingRequestOutput
@@ -68,15 +71,20 @@ class OpenAIServingEmbedding(OpenAIServing):
                          lora_modules=None,
                          prompt_adapters=None,
                          request_logger=request_logger)
-        self._check_embedding_mode(model_config.embedding_mode)
+        self._enabled = self._check_embedding_mode(model_config.embedding_mode)
 
-    async def create_embedding(self, request: EmbeddingRequest,
-                               raw_request: Request):
+    async def create_embedding(
+        self,
+        request: EmbeddingRequest,
+        raw_request: Optional[Request] = None
+    ) -> Union[ErrorResponse, EmbeddingResponse]:
         """Completion API similar to OpenAI's API.
 
         See https://platform.openai.com/docs/api-reference/embeddings/create
         for the API specification. This API mimics the OpenAI Embedding API.
         """
+        if not self._enabled:
+            return self.create_error_response("Embedding API disabled")
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
             return error_check_ret
@@ -92,7 +100,7 @@ class OpenAIServingEmbedding(OpenAIServing):
         created_time = int(time.monotonic())
 
         # Schedule the request and get the result generator.
-        generators: List[AsyncIterator[EmbeddingRequestOutput]] = []
+        generators: List[AsyncGenerator[EmbeddingRequestOutput, None]] = []
         try:
             (
                 lora_request,
@@ -138,17 +146,16 @@ class OpenAIServingEmbedding(OpenAIServing):
             return self.create_error_response(str(e))
 
         result_generator: AsyncIterator[Tuple[
-            int, EmbeddingRequestOutput]] = merge_async_iterators(*generators)
+            int, EmbeddingRequestOutput]] = merge_async_iterators(
+                *generators,
+                is_cancelled=raw_request.is_disconnected
+                if raw_request else None)
 
         # Non-streaming response
         final_res_batch: List[Optional[EmbeddingRequestOutput]]
         final_res_batch = [None] * len(prompts)
         try:
             async for i, res in result_generator:
-                if await raw_request.is_disconnected():
-                    # Abort the request if the client disconnects.
-                    await self.async_engine_client.abort(f"{request_id}-{i}")
-                    return self.create_error_response("Client disconnected")
                 final_res_batch[i] = res
 
             for final_res in final_res_batch:
@@ -160,6 +167,8 @@ class OpenAIServingEmbedding(OpenAIServing):
             response = request_output_to_embedding_response(
                 final_res_batch_checked, request_id, created_time, model_name,
                 encoding_format)
+        except asyncio.CancelledError:
+            return self.create_error_response("Client disconnected")
         except ValueError as e:
             # TODO: Use a vllm-specific Validation Error
             return self.create_error_response(str(e))
@@ -172,3 +181,4 @@ class OpenAIServingEmbedding(OpenAIServing):
                 "embedding_mode is False. Embedding API will not work.")
         else:
             logger.info("Activating the server engine with embedding enabled.")
+        return embedding_mode

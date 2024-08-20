@@ -1,3 +1,4 @@
+import asyncio
 import time
 from typing import (AsyncGenerator, AsyncIterator, Callable, Dict, List,
                     Optional)
@@ -83,8 +84,17 @@ class OpenAIServingCompletion(OpenAIServing):
         request_id = f"cmpl-{random_uuid()}"
         created_time = int(time.time())
 
+        if request.prompt_logprobs is not None:
+            if request.stream and request.prompt_logprobs > 0:
+                return self.create_error_response(
+                    "Prompt_logprobs are not available when stream is enabled")
+            elif request.prompt_logprobs < 0:
+                return self.create_error_response(
+                    f"Prompt_logprobs set to invalid negative "
+                    f"value: {request.prompt_logprobs}")
+
         # Schedule the request and get the result generator.
-        generators: List[AsyncIterator[RequestOutput]] = []
+        generators: List[AsyncGenerator[RequestOutput, None]] = []
         try:
             (
                 lora_request,
@@ -144,7 +154,8 @@ class OpenAIServingCompletion(OpenAIServing):
             return self.create_error_response(str(e))
 
         result_generator: AsyncIterator[Tuple[
-            int, RequestOutput]] = merge_async_iterators(*generators)
+            int, RequestOutput]] = merge_async_iterators(
+                *generators, is_cancelled=raw_request.is_disconnected)
 
         # Similar to the OpenAI API, when n != best_of, we do not stream the
         # results. In addition, we do not stream the results when use
@@ -156,7 +167,6 @@ class OpenAIServingCompletion(OpenAIServing):
         # Streaming response
         if stream:
             return self.completion_stream_generator(request,
-                                                    raw_request,
                                                     result_generator,
                                                     request_id,
                                                     created_time,
@@ -168,10 +178,6 @@ class OpenAIServingCompletion(OpenAIServing):
         final_res_batch: List[Optional[RequestOutput]] = [None] * len(prompts)
         try:
             async for i, res in result_generator:
-                if await raw_request.is_disconnected():
-                    # Abort the request if the client disconnects.
-                    await self.async_engine_client.abort(f"{request_id}-{i}")
-                    return self.create_error_response("Client disconnected")
                 final_res_batch[i] = res
 
             for i, final_res in enumerate(final_res_batch):
@@ -194,6 +200,8 @@ class OpenAIServingCompletion(OpenAIServing):
                 model_name,
                 tokenizer,
             )
+        except asyncio.CancelledError:
+            return self.create_error_response("Client disconnected")
         except ValueError as e:
             # TODO: Use a vllm-specific Validation Error
             return self.create_error_response(str(e))
@@ -214,7 +222,6 @@ class OpenAIServingCompletion(OpenAIServing):
     async def completion_stream_generator(
         self,
         request: CompletionRequest,
-        raw_request: Request,
         result_generator: AsyncIterator[Tuple[int, RequestOutput]],
         request_id: str,
         created_time: int,
@@ -229,12 +236,6 @@ class OpenAIServingCompletion(OpenAIServing):
 
         try:
             async for prompt_idx, res in result_generator:
-
-                # Abort the request if the client disconnects.
-                if await raw_request.is_disconnected():
-                    await self.async_engine_client.abort(
-                        f"{request_id}-{prompt_idx}")
-                    raise StopAsyncIteration()
 
                 for output in res.outputs:
                     i = output.index + prompt_idx * num_choices
@@ -385,6 +386,7 @@ class OpenAIServingCompletion(OpenAIServing):
                     logprobs=logprobs,
                     finish_reason=output.finish_reason,
                     stop_reason=output.stop_reason,
+                    prompt_logprobs=final_res.prompt_logprobs,
                 )
                 choices.append(choice_data)
 
