@@ -2,12 +2,13 @@
 within a vision language model."""
 
 import math
-from typing import Optional, Tuple
+from array import array
+from typing import Iterable, Optional, Tuple
 
 import torch
 from PIL import Image
 from torch import nn
-from transformers import SiglipConfig, SiglipVisionConfig
+from transformers import SiglipVisionConfig
 from transformers.models.siglip.modeling_siglip import SiglipAttention
 from vllm_flash_attn import flash_attn_func
 from xformers.ops import memory_efficient_attention
@@ -22,13 +23,15 @@ from vllm.model_executor.layers.linear import (ColumnParallelLinear,
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
-from vllm.multimodal.image import (cached_get_tokenizer,
-                                   repeat_and_pad_image_tokens)
-from vllm.sequence import SequenceData
+from vllm.model_executor.model_loader.weight_utils import default_weight_loader
+from vllm.multimodal.utils import (cached_get_tokenizer,
+                                   repeat_and_pad_placeholder_tokens)
+from vllm.sequence import VLLM_TOKEN_ID_ARRAY_TYPE, SequenceData
 
 
 def get_siglip_patch_grid_length(*, image_size: int, patch_size: int) -> int:
-    assert image_size % patch_size == 0
+    # Since interpolation is applied, the image size need not be divisible
+    # assert image_size % patch_size == 0
     return image_size // patch_size
 
 
@@ -50,6 +53,7 @@ def get_max_siglip_image_tokens(hf_config: SiglipVisionConfig) -> int:
 def dummy_seq_data_for_siglip(
     hf_config: SiglipVisionConfig,
     seq_len: int,
+    num_images: int,
     *,
     image_token_id: int,
     image_feature_size_override: Optional[int] = None,
@@ -59,13 +63,16 @@ def dummy_seq_data_for_siglip(
     else:
         image_feature_size = image_feature_size_override
 
-    token_ids = [image_token_id] * image_feature_size
-    token_ids += [0] * (seq_len - image_feature_size)
+    token_ids = array(VLLM_TOKEN_ID_ARRAY_TYPE,
+                      [image_token_id]) * image_feature_size
+    token_ids += array(VLLM_TOKEN_ID_ARRAY_TYPE,
+                       [0]) * (seq_len - image_feature_size)
     return SequenceData(token_ids)
 
 
 def dummy_image_for_siglip(
     hf_config: SiglipVisionConfig,
+    num_images: int,
     *,
     image_width_override: Optional[int] = None,
     image_height_override: Optional[int] = None,
@@ -77,7 +84,7 @@ def dummy_image_for_siglip(
         height = image_height_override
 
     image = Image.new("RGB", (width, height), color=0)
-    return {"image": image}
+    return {"image": image if num_images == 1 else [image] * num_images}
 
 
 def input_processor_for_siglip(
@@ -95,15 +102,21 @@ def input_processor_for_siglip(
     tokenizer = cached_get_tokenizer(model_config.tokenizer)
 
     if image_feature_size_override is None:
-        image_feature_size = get_siglip_image_feature_size(hf_config)
+        image_data = multi_modal_data["image"]
+        if isinstance(image_data, Image.Image):
+            image_feature_size = get_siglip_image_feature_size(hf_config)
+        elif isinstance(image_data, torch.Tensor):
+            image_feature_size = image_data.shape[0]
+        else:
+            raise TypeError(f"Invalid image type: {type(image_data)}")
     else:
         image_feature_size = image_feature_size_override
 
-    new_prompt, new_token_ids = repeat_and_pad_image_tokens(
+    new_prompt, new_token_ids = repeat_and_pad_placeholder_tokens(
         tokenizer,
         llm_inputs.get("prompt"),
         llm_inputs["prompt_token_ids"],
-        image_token_id=image_token_id,
+        placeholder_token_id=image_token_id,
         repeat_count=image_feature_size,
     )
 
@@ -454,7 +467,7 @@ class SiglipEncoderLayer(nn.Module):
 
     def __init__(
         self,
-        config: SiglipConfig,
+        config: SiglipVisionConfig,
         quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
@@ -474,7 +487,7 @@ class SiglipEncoderLayer(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-    ) -> Tuple[torch.Tensor]:
+    ) -> Tuple[torch.Tensor, None]:
         residual = hidden_states
 
         hidden_states = self.layer_norm1(hidden_states)
@@ -493,22 +506,27 @@ class SiglipEncoder(nn.Module):
 
     def __init__(
         self,
-        config: SiglipConfig,
+        config: SiglipVisionConfig,
         quant_config: Optional[QuantizationConfig] = None,
+        num_hidden_layers_override: Optional[int] = None,
     ):
         super().__init__()
         self.config = config
+
+        if num_hidden_layers_override is None:
+            num_hidden_layers = config.num_hidden_layers
+        else:
+            num_hidden_layers = num_hidden_layers_override
+
         self.layers = nn.ModuleList([
-            SiglipEncoderLayer(
-                config,
-                quant_config=quant_config,
-            ) for _ in range(config.num_hidden_layers)
+            SiglipEncoderLayer(config, quant_config=quant_config)
+            for _ in range(num_hidden_layers)
         ])
 
     def forward(
         self,
         inputs_embeds: torch.Tensor,
-    ) -> Tuple:
+    ) -> torch.Tensor:
         hidden_states = inputs_embeds
         for encoder_layer in self.layers:
             hidden_states, _ = encoder_layer(hidden_states)
@@ -553,6 +571,7 @@ class SiglipVisionTransformer(nn.Module):
         self,
         config: SiglipVisionConfig,
         quant_config: Optional[QuantizationConfig] = None,
+        num_hidden_layers_override: Optional[int] = None,
     ):
         super().__init__()
         self.config = config
@@ -562,6 +581,7 @@ class SiglipVisionTransformer(nn.Module):
         self.encoder = SiglipEncoder(
             config,
             quant_config=quant_config,
+            num_hidden_layers_override=num_hidden_layers_override,
         )
         self.post_layernorm = nn.LayerNorm(embed_dim,
                                            eps=config.layer_norm_eps)
@@ -600,11 +620,13 @@ class SiglipVisionModel(nn.Module):
         self,
         config: SiglipVisionConfig,
         quant_config: Optional[QuantizationConfig] = None,
+        num_hidden_layers_override: Optional[int] = None,
     ):
         super().__init__()
         self.vision_model = SiglipVisionTransformer(
             config,
             quant_config,
+            num_hidden_layers_override=num_hidden_layers_override,
         )
 
     def get_input_embeddings(self) -> nn.Module:
@@ -619,3 +641,19 @@ class SiglipVisionModel(nn.Module):
             pixel_values=pixel_values,
             interpolate_pos_encoding=interpolate_pos_encoding,
         )
+
+    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
+        params_dict = dict(self.named_parameters())
+        layer_count = len(self.vision_model.encoder.layers)
+
+        for name, loaded_weight in weights:
+            # omit layers when num_hidden_layers_override is set
+            if "vision_model.encoder.layers." in name:
+                layer_idx = int(name.split(".")[3])
+                if layer_idx >= layer_count:
+                    continue
+
+            param = params_dict[name]
+            weight_loader = getattr(param, "weight_loader",
+                                    default_weight_loader)
+            weight_loader(param, loaded_weight)
