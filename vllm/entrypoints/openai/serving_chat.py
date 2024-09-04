@@ -11,7 +11,7 @@ from vllm.engine.protocol import AsyncEngineClient
 from vllm.entrypoints.chat_utils import (ConversationMessage,
                                          apply_chat_template,
                                          load_chat_template,
-                                         parse_chat_messages)
+                                         parse_chat_messages_futures)
 from vllm.entrypoints.logger import RequestLogger
 from vllm.entrypoints.openai.protocol import (
     ChatCompletionLogProb, ChatCompletionLogProbs,
@@ -22,10 +22,10 @@ from vllm.entrypoints.openai.protocol import (
     FunctionCall, ToolCall, UsageInfo)
 from vllm.entrypoints.openai.serving_engine import (LoRAModulePath,
                                                     OpenAIServing,
-                                                    PromptAdapterPath)
+                                                    PromptAdapterPath,
+                                                    TextTokensPrompt)
 from vllm.inputs import TokensPrompt
 from vllm.logger import init_logger
-from vllm.multimodal import MultiModalDataDict
 from vllm.outputs import RequestOutput
 from vllm.sequence import Logprob
 from vllm.tracing import (contains_trace_headers, extract_trace_headers,
@@ -93,7 +93,7 @@ class OpenAIServingChat(OpenAIServing):
             tokenizer = await self.async_engine_client.get_tokenizer(
                 lora_request)
 
-            conversation, mm_futures = parse_chat_messages(
+            conversation, mm_data_future = parse_chat_messages_futures(
                 request.messages, model_config, tokenizer)
 
             tool_dicts = None if request.tools is None else [
@@ -113,14 +113,8 @@ class OpenAIServingChat(OpenAIServing):
             logger.error("Error in applying chat template from request: %s", e)
             return self.create_error_response(str(e))
 
-        mm_data: Optional[MultiModalDataDict] = None
         try:
-            if len(mm_futures):
-                # since we support only single mm data currently
-                assert len(
-                    mm_futures
-                ) == 1, "Multiple 'image_url' input is currently not supported."
-                mm_data = await mm_futures[0]
+            mm_data = await mm_data_future
         except Exception as e:
             logger.error("Error in loading multi-modal data: %s", e)
             return self.create_error_response(str(e))
@@ -130,13 +124,22 @@ class OpenAIServingChat(OpenAIServing):
             guided_decode_logits_processor = (
                 await self._guided_decode_logits_processor(request, tokenizer))
 
-            prompt_inputs = self._tokenize_prompt_input(
-                request,
-                tokenizer,
-                prompt,
-                truncate_prompt_tokens=request.truncate_prompt_tokens,
-                add_special_tokens=request.add_special_tokens,
-            )
+            if isinstance(prompt, str):
+                prompt_inputs = self._tokenize_prompt_input(
+                    request,
+                    tokenizer,
+                    prompt,
+                    truncate_prompt_tokens=request.truncate_prompt_tokens,
+                    add_special_tokens=request.add_special_tokens,
+                )
+            else:
+                assert isinstance(prompt, list) and isinstance(
+                    prompt[0], int
+                ), "Prompt has to be either a string or a list of token ids"
+                prompt_inputs = TextTokensPrompt(
+                    prompt=tokenizer.decode(prompt), prompt_token_ids=prompt)
+
+            assert prompt_inputs is not None
 
             sampling_params = request.to_sampling_params(
                 tokenizer,
