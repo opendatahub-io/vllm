@@ -29,6 +29,7 @@ from vllm.entrypoints.openai.serving_engine import (LoRAModulePath,
                                                     TextTokensPrompt)
 from vllm.entrypoints.openai.tool_parsers import (GraniteToolParser,
                                                   Hermes2ProToolParser,
+                                                  LlamaToolParser,
                                                   MistralToolParser,
                                                   ToolParser)
 from vllm.inputs import TokensPrompt
@@ -84,6 +85,8 @@ class OpenAIServingChat(OpenAIServing):
                 self.tool_parser = MistralToolParser
             elif tool_parser == "hermes":
                 self.tool_parser = Hermes2ProToolParser
+            elif tool_parser == "llama":
+                self.tool_parser = LlamaToolParser
             elif tool_parser == "granite":
                 self.tool_parser = GraniteToolParser
             else:
