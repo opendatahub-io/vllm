@@ -6,7 +6,7 @@ USER root
 ENV VLLM_TARGET_DEVICE="hpu"
 ENV HABANA_SOFTWARE_VERSION="1.17.0-495"
 
-RUN dnf -y update && dnf clean all
+RUN dnf -y update --best --allowerasing --skip-broken && dnf clean all
 
 WORKDIR /workspace
 
