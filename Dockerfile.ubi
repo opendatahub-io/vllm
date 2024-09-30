@@ -9,7 +9,7 @@ RUN mkdir /tmp/vllm-repo
 RUN git clone -b ibm-20240930 https://github.com/opendatahub-io/vllm.git /tmp/vllm-repo
 
 # Copy the updated vllm source code from the temporary directory to the installed location to overwrite the installed Python code
-RUN cp -r /tmp/vllm-repo/* /opt/vllm/lib64/python3.11/site-packages/vllm
+COPY /tmp/vllm-repo/* /opt/vllm/lib64/python3.11/site-packages/vllm/
 
 # Clean up by removing the temporary directory
 RUN rm -rf /tmp/vllm-repo
