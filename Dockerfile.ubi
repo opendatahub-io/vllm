@@ -2,17 +2,11 @@ FROM quay.io/dtrifiro/vllm:fast-ibm-add07008 as vllm-grpc-adapter
 
 USER root
 
-# Create a temporary directory
-RUN mkdir /tmp/vllm-repo
+# Clean the destination directory before cloning
+RUN rm -rf /opt/vllm/lib64/python3.11/site-packages/vllm/*
 
-# Clone the ibm-20240930 branch from the repository into the temporary directory
-RUN git clone -b ibm-20240930 https://github.com/opendatahub-io/vllm.git /tmp/vllm-repo
-
-# Ensure the destination directory exists
-RUN mkdir -p /opt/vllm/lib64/python3.11/site-packages/vllm
-
-# Copy the updated vllm source code from the temporary directory to the installed location to overwrite the installed Python code
-COPY --from=vllm-grpc-adapter /tmp/vllm-repo /opt/vllm/lib64/python3.11/site-packages/vllm/
+# Clone the ibm-20240930 branch from the repository directly into the destination directory
+RUN git clone -b ibm-20240930 https://github.com/opendatahub-io/vllm.git /opt/vllm/lib64/python3.11/site-packages/vllm/
 
 # Clean up by removing the temporary directory
 RUN rm -rf /tmp/vllm-repo
