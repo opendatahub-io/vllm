@@ -8,23 +8,21 @@ RUN mkdir /tmp/vllm-repo
 # Clone the ibm-20240930 branch from the repository into the temporary directory
 RUN git clone -b ibm-20240930 https://github.com/opendatahub-io/vllm.git /tmp/vllm-repo
 
+# Ensure the destination directory exists
+RUN mkdir -p /opt/vllm/lib64/python3.11/site-packages/vllm
+
 # Copy the updated vllm source code from the temporary directory to the installed location to overwrite the installed Python code
-COPY /tmp/vllm-repo/* /opt/vllm/lib64/python3.11/site-packages/vllm/
+COPY --from=vllm-grpc-adapter /tmp/vllm-repo /opt/vllm/lib64/python3.11/site-packages/vllm/
 
 # Clean up by removing the temporary directory
 RUN rm -rf /tmp/vllm-repo
 
-# RUN --mount=type=cache,target=/root/.cache/pip \
-#    pip install vllm-tgis-adapter==0.5.0
+# Install the vllm-tgis-adapter
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install git+https://github.com/opendatahub-io/vllm-tgis-adapter@version-bugfix  
 
 ENV GRPC_PORT=8033 \
     PORT=8000 \
-    # As an optimization, vLLM disables logprobs when using spec decoding by
-    # default, but this would be unexpected to users of a hosted model that
-    # happens to have spec decoding
-    # see: https://github.com/vllm-project/vllm/pull/6485
     DISABLE_LOGPROBS_DURING_SPEC_DECODING=false
 
 USER 2000
