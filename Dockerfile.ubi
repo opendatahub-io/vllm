@@ -3,10 +3,10 @@ FROM quay.io/dtrifiro/vllm:fast-ibm-add07008 as vllm-grpc-adapter
 USER root
 
 # Clean the destination directory before cloning
-RUN rm -rf /opt/vllm/lib64/python3.11/site-packages/vllm/*
+RUN rm -rf /opt/vllm/lib64/python3.12/site-packages/vllm/*
 
 # Clone the ibm-20240930 branch from the repository directly into the destination directory
-RUN git clone -b ibm-20240930 https://github.com/opendatahub-io/vllm.git /opt/vllm/lib64/python3.11/site-packages/vllm/
+RUN git clone -b ibm-20240930 https://github.com/opendatahub-io/vllm.git /opt/vllm/lib64/python3.12/site-packages/vllm/
 
 # Clean up by removing the temporary directory
 RUN rm -rf /tmp/vllm-repo
