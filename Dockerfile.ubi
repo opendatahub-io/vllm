@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 ## Global Args #################################################################
 ARG BASE_UBI_IMAGE_TAG=9.4
 ARG PYTHON_VERSION=3.12
@@ -116,17 +117,17 @@ ENV VLLM_INSTALL_PUNICA_KERNELS=1
 # Make sure the cuda environment is in the PATH
 ENV PATH=/usr/local/cuda/bin:$PATH
 
-ARG access_key_id
-ARG secret_access_key
 ENV SCCACHE_S3_KEY_PREFIX='sccache' \
     SCCACHE_BUCKET=fmaas-integration-tests \
     SCCACHE_REGION=us-east \
-    SCCACHE_ENDPOINT=s3.us-east.cloud-object-storage.appdomain.cloud \
-    AWS_ACCESS_KEY_ID=${access_key_id} \
-    AWS_SECRET_ACCESS_KEY=${secret_access_key}
-RUN --mount=type=cache,target=/root/.cache/pip \
+    SCCACHE_ENDPOINT=s3.us-east.cloud-object-storage.appdomain.cloud
+
+RUN --mount=type=secret,id=AWS_ACCESS_KEY_ID,env=AWS_ACCESS_KEY_ID,required=True \
+    --mount=type=secret,id=AWS_SECRET_ACCESS_KEY,env=AWS_SECRET_ACCESS_KEY,required=True \
+--mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,src=.git,target=/workspace/.git \
+
     env CFLAGS="-march=haswell" \
         CXXFLAGS="$CFLAGS $CXXFLAGS" \
         CMAKE_BUILD_TYPE=Release \
