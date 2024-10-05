@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 ## Global Args #################################################################
 ARG BASE_UBI_IMAGE_TAG=9.4
 ARG PYTHON_VERSION=3.12
@@ -6,7 +7,7 @@ ARG TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 8.9 9.0+PTX"
 ARG vllm_fa_cmake_gpu_arches='80-real;90-real'
 
 ## Base Layer ##################################################################
-FROM registry.access.redhat.com/ubi9/ubi-minimal:${BASE_UBI_IMAGE_TAG} as base
+FROM registry.access.redhat.com/ubi9/ubi-minimal:${BASE_UBI_IMAGE_TAG} AS base
 ARG PYTHON_VERSION
 ENV PYTHON_VERSION=${PYTHON_VERSION}
 RUN microdnf -y update && microdnf install -y \
@@ -25,7 +26,7 @@ RUN microdnf install -y \
 
 
 ## Python Installer ############################################################
-FROM base as python-install
+FROM base AS python-install
 ARG PYTHON_VERSION
 
 ENV VIRTUAL_ENV=/opt/vllm
@@ -37,7 +38,7 @@ RUN microdnf install -y \
 
 
 ## CUDA Base ###################################################################
-FROM python-install as cuda-base
+FROM python-install AS cuda-base
 
 RUN curl -Lo /etc/yum.repos.d/cuda-rhel9.repo \
         https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo
@@ -46,9 +47,9 @@ RUN microdnf install -y \
         cuda-nvcc-12-4 cuda-nvtx-12-4 cuda-libraries-devel-12-4 && \
     microdnf clean all
 
-ENV CUDA_HOME="/usr/local/cuda" \
-    PATH="${CUDA_HOME}/bin:${PATH}" \
-    LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/extras/CUPTI/lib64:${LD_LIBRARY_PATH}"
+ENV CUDA_HOME="/usr/local/cuda"
+ENV PATH="${CUDA_HOME}/bin:${PATH}"
+ENV LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/extras/CUPTI/lib64"
 
 ## Python cuda base #################################################################
 FROM cuda-base AS python-cuda-base
@@ -89,9 +90,13 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=bind,source=requirements-build.txt,target=requirements-build.txt \
     uv pip install -r requirements-build.txt
 
-# install compiler cache to speed up compilation leveraging local or remote caching
-# git is required for the cutlass kernels
-RUN rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && rpm -ql epel-release && microdnf install -y git ccache && microdnf clean all
+# Install extra build requirements:
+# - git is required for the cutlass kernels
+# - sccache is used to use the shared compiler cache
+RUN microdnf install -y git && microdnf clean all && \
+    curl -L -o sccache.tar.gz https://github.com/mozilla/sccache/releases/download/v0.8.2/sccache-v0.8.2-x86_64-unknown-linux-musl.tar.gz && \
+    tar -xf sccache.tar.gz && \
+    mv sccache*/sccache /usr/bin/ && rm -rf sccache.tar.gz sccache*
 
 COPY . .
 
@@ -101,10 +106,10 @@ ARG vllm_fa_cmake_gpu_arches
 ENV VLLM_FA_CMAKE_GPU_ARCHES=${vllm_fa_cmake_gpu_arches}
 
 # max jobs used by Ninja to build extensions
-ARG max_jobs=2
+ARG max_jobs=8
 ENV MAX_JOBS=${max_jobs}
 # number of threads used by nvcc
-ARG nvcc_threads=8
+ARG nvcc_threads=4
 ENV NVCC_THREADS=$nvcc_threads
 # make sure punica kernels are built (for LoRA)
 ENV VLLM_INSTALL_PUNICA_KERNELS=1
@@ -112,18 +117,24 @@ ENV VLLM_INSTALL_PUNICA_KERNELS=1
 # Make sure the cuda environment is in the PATH
 ENV PATH=/usr/local/cuda/bin:$PATH
 
-ENV CCACHE_DIR=/root/.cache/ccache
-RUN --mount=type=cache,target=/root/.cache/ccache \
-    --mount=type=cache,target=/root/.cache/pip \
+ENV SCCACHE_S3_KEY_PREFIX='sccache' \
+    SCCACHE_BUCKET=fmaas-integration-tests \
+    SCCACHE_REGION=us-east \
+    SCCACHE_ENDPOINT=s3.us-east.cloud-object-storage.appdomain.cloud
+
+RUN --mount=type=secret,id=AWS_ACCESS_KEY_ID,env=AWS_ACCESS_KEY_ID,required=True \
+    --mount=type=secret,id=AWS_SECRET_ACCESS_KEY,env=AWS_SECRET_ACCESS_KEY,required=True \
+--mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,src=.git,target=/workspace/.git \
+
     env CFLAGS="-march=haswell" \
         CXXFLAGS="$CFLAGS $CXXFLAGS" \
         CMAKE_BUILD_TYPE=Release \
         python3 setup.py bdist_wheel --dist-dir=dist
 
 #################### libsodium Build IMAGE ####################
-FROM base as libsodium-builder
+FROM base AS libsodium-builder
 
 RUN microdnf install -y gcc gzip \
     && microdnf clean all
@@ -149,7 +160,7 @@ ENV VIRTUAL_ENV=/opt/vllm
 ENV PATH=$VIRTUAL_ENV/bin/:$PATH
 
 # force using the python venv's cuda runtime libraries
-ENV LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib/python${PYTHON_VERSION}/site-packages/nvidia/cuda_nvrtc/lib:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib/python${PYTHON_VERSION}/site-packages/nvidia/cuda_nvrtc/lib"
 ENV LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib/python${PYTHON_VERSION}/site-packages/nvidia/cuda_runtime/lib:${LD_LIBRARY_PATH}"
 ENV LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib/python${PYTHON_VERSION}/site-packages/nvidia/nvtx/lib:${LD_LIBRARY_PATH}"
 
@@ -197,7 +208,7 @@ USER 2000
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
 
 
-FROM vllm-openai as vllm-grpc-adapter
+FROM vllm-openai AS vllm-grpc-adapter
 
 USER root
 
