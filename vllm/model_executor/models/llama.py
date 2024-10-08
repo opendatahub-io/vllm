@@ -512,7 +512,10 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
                 quant_config=quant_config,
             )
             if config.tie_word_embeddings:
-                self.lm_head = self.model.embed_tokens
+                # Reverted logic to fix build issues;
+                # this may introduce GGUF-related bugs.
+                # self.lm_head = self.model.embed_tokens
+                self.lm_head.weight = self.model.embed_tokens.weight
 
             logit_scale = getattr(config, "logit_scale", 1.0)
             self.logits_processor = LogitsProcessor(self.unpadded_vocab_size,
