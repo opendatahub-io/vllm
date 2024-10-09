@@ -167,10 +167,20 @@ def sql_lora_files(sql_lora_huggingface_id):
 
 
 @pytest.fixture(scope="session")
+def lora_bias_files():
+    return snapshot_download(repo_id="followumesh/granite-3b-lora8-bias")
+
+
+@pytest.fixture(scope="session")
 def mixtral_lora_files():
     # Note: this module has incorrect adapter_config.json to test
     # https://github.com/vllm-project/vllm/pull/5909/files.
     return snapshot_download(repo_id="SangBinCho/mixtral-lora")
+
+
+@pytest.fixture(scope="session")
+def mixtral_lora_files_all_target_modules():
+    return snapshot_download(repo_id="dyang415/mixtral-lora-v0")
 
 
 @pytest.fixture(scope="session")
@@ -192,6 +202,11 @@ def baichuan_lora_files():
 def baichuan_zero_lora_files():
     # all the lora_B weights are initialized to zero.
     return snapshot_download(repo_id="jeeejeee/baichuan7b-zero-init")
+
+
+@pytest.fixture(scope="session")
+def minicpmv_lora_files():
+    return snapshot_download(repo_id="jeeejeee/minicpmv25-lora-pokemon")
 
 
 @pytest.fixture(scope="session")
