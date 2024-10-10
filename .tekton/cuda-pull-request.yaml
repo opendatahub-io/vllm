@@ -34,8 +34,8 @@ spec:
     - pipelineTaskName: build-images
       computeResources:
         requests:
-          cpu: '48'
-          memory: 96Gi
+          cpu: '24'
+          memory: 48Gi
         limits:
           cpu: '96'
           memory: 96Gi
