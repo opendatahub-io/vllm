@@ -28,6 +28,15 @@ spec:
     value: 5d
   - name: dockerfile
     value: Dockerfile.ubi
+  taskRunSpecs:
+    - pipelineTaskName: build-container
+      computeResources:
+        requests:
+          cpu: '48'
+          memory: 96Gi
+        limits:
+          cpu: '96'
+          memory: 96Gi
   pipelineSpec:
     description: |
       This pipeline is ideal for building container images from a Containerfile while reducing network traffic.
@@ -119,7 +128,7 @@ spec:
       description: Add built image into an OCI image index
       name: build-image-index
       type: string
-    - default: []
+    - default: ["max_jobs=48", "nvcc_threads=4"]
       description: Array of --build-arg values ("arg=value" strings) for buildah
       name: build-args
       type: array
@@ -497,7 +506,7 @@ spec:
         - ReadWriteOnce
         resources:
           requests:
-            storage: 1Gi
+            storage: 30Gi
       status: {}
   - name: git-auth
     secret:
