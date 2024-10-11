@@ -84,7 +84,18 @@ _EMBEDDING_MODELS = {
     "MistralModel": ("llama_embedding", "LlamaEmbeddingModel"),
     "Qwen2ForRewardModel": ("qwen2_rm", "Qwen2ForRewardModel"),
     "Gemma2Model": ("gemma2_embedding", "Gemma2EmbeddingModel"),
+    "BertForMaskedLM": ("bert_embedding", "BertEmbeddingModel"),
+    "BertModel": ("bert_embedding", "BertEmbeddingModel"),
+    "RobertaForMaskedLM": ("roberta_embedding", "RobertaEmbeddingModel"),
+    "RobertaModel": ("roberta_embedding", "RobertaEmbeddingModel"),
 }
+
+_ENCODER_MODELS = [
+    "BertForMaskedLM",
+    "BertModel",
+    "RobertaForMaskedLM",
+    "RobertaModel",
+]
 
 _MULTIMODAL_MODELS = {
     # [Decoder-only]
@@ -338,6 +349,15 @@ class ModelRegistry:
                          default=False)
 
         return any(is_emb(arch) for arch in architectures)
+    
+    @staticmethod
+    def is_encoder_model(architectures: Union[str, List[str]]) -> bool:
+        if isinstance(architectures, str):
+            architectures = [architectures]
+        if not architectures:
+            logger.warning("No model architectures are specified")
+
+        return any(arch in _ENCODER_MODELS for arch in architectures)
 
     @staticmethod
     def is_multimodal_model(architectures: Union[str, List[str]]) -> bool:

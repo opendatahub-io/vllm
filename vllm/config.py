@@ -557,6 +557,10 @@ class ModelConfig:
                 self.hf_config.text_config, "is_encoder_decoder", False)))
 
     @property
+    def is_encoder_model(self) -> bool:
+        return ModelRegistry.is_encoder_model(self.hf_config.architectures)
+
+    @property
     def is_embedding_model(self) -> bool:
         """Extract the embedding model flag."""
         return self.embedding_mode
