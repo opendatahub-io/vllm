@@ -21,7 +21,9 @@ class EmbeddingModelBlockSpaceManager(BlockSpaceManager):
     ) -> None:
         pass
 
-    def can_allocate(self, seq_group: SequenceGroup) -> AllocStatus:
+    def can_allocate(self,
+                     seq_group: SequenceGroup,
+                     num_lookahead_slots: int = 0) -> AllocStatus:
         # Always return OK for dummy purposes
         return AllocStatus.OK
 
@@ -60,7 +62,14 @@ class EmbeddingModelBlockSpaceManager(BlockSpaceManager):
         # No operation on free
         return
 
+    def free_cross(self, seq: Sequence) -> None:
+        # No operation on free
+        return
+
     def get_block_table(self, seq: Sequence) -> List[int]:
+        return None  # type: ignore
+
+    def get_cross_block_table(self, seq: Sequence) -> List[int]:
         return None  # type: ignore
 
     def get_num_free_gpu_blocks(self) -> int:
