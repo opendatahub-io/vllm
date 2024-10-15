@@ -538,18 +538,17 @@ class OpenAIServingChat(OpenAIServing):
                         #   any tokens that were generated but previously
                         #   matched by partial json parsing
                         # only happens if we are NOT using guided decoding
-                        if tool_choice_auto:
-                            assert tool_parser is not None
-                            index = len(
-                                tool_parser.prev_tool_call_arr) - 1 if len(
-                                    tool_parser.prev_tool_call_arr) > 0 else 0
+                        auto_tools_called = False
+                        if tool_parser:
+                            auto_tools_called = len(
+                                tool_parser.prev_tool_call_arr) > 0
+                            index = len(tool_parser.prev_tool_call_arr
+                                        ) - 1 if auto_tools_called else 0
                         else:
                             index = 0
 
-                        if tool_choice_auto and \
-                            self._should_check_for_unstreamed_tool_arg_tokens(
-                                delta_message, output):
-                            assert tool_parser is not None
+                        if self._should_check_for_unstreamed_tool_arg_tokens(
+                                delta_message, output) and tool_parser:
                             # get the expected call based on partial JSON
                             # parsing which "autocompletes" the JSON
                             expected_call = json.dumps(
@@ -579,9 +578,7 @@ class OpenAIServingChat(OpenAIServing):
                             delta=delta_message,
                             logprobs=logprobs,
                             finish_reason=output.finish_reason
-                            if not (tool_parser
-                                    and len(tool_parser.prev_tool_call_arr))
-                            else "tool_calls",
+                            if not auto_tools_called else "tool_calls",
                             stop_reason=output.stop_reason)
                         chunk = ChatCompletionStreamResponse(
                             id=request_id,
@@ -683,8 +680,10 @@ class OpenAIServingChat(OpenAIServing):
             else:
                 logprobs = None
 
-            # by default, tools are not used.
-            tools_called = False
+            # In the OpenAI API the finish_reason is "tools_called"
+            # if the tool choice is auto and the model produced a tool
+            # call. The same is not true for named function calls
+            auto_tools_called = False
 
             # if auto tools are not enabled, and a named tool choice using
             #   outlines is not being used
@@ -706,7 +705,6 @@ class OpenAIServingChat(OpenAIServing):
                             name=request.tool_choice.function.name,
                             arguments=output.text))
                     ])
-                tools_called = True
 
             # if the request doesn't use tool choice
             # OR specifies to not use a tool
@@ -728,7 +726,10 @@ class OpenAIServingChat(OpenAIServing):
 
                 tool_call_info = tool_parser.extract_tool_calls(
                     output.text, request=request)
-                tools_called = tool_call_info.tools_called
+                # In the OpenAI API the finish_reason is "tools_called"
+                # if the tool choice is auto and the model produced a tool
+                # call. The same is not true for named function calls
+                auto_tools_called = tool_call_info.tools_called
                 if tool_call_info.tools_called:
                     message = ChatMessage(role=role,
                                           content=tool_call_info.content,
@@ -751,7 +752,7 @@ class OpenAIServingChat(OpenAIServing):
                 index=output.index,
                 message=message,
                 logprobs=logprobs,
-                finish_reason="tool_calls" if tools_called else
+                finish_reason="tool_calls" if auto_tools_called else
                 output.finish_reason if output.finish_reason else "stop",
                 stop_reason=output.stop_reason)
             choices.append(choice_data)

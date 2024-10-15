@@ -204,7 +204,7 @@ USER root
 # RUN --mount=type=cache,target=/root/.cache/pip \
 #     pip install vllm-tgis-adapter==0.5.1
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install git+https://github.com/opendatahub-io/vllm-tgis-adapter@main 
+    pip install vllm-tgis-adapter==0.5.3
 
 ENV GRPC_PORT=8033 \
     PORT=8000 \
