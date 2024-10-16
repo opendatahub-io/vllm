@@ -341,12 +341,6 @@ class SamplingParams(
                              f"type {type(self.n)}")
         if self.n < 1:
             raise ValueError(f"n must be at least 1, got {self.n}.")
-        if not isinstance(self.best_of, int):
-            raise ValueError(f"best_of must be an int, but is of "
-                             f"type {type(self.best_of)}")
-        if self.best_of < self.n:
-            raise ValueError(f"best_of must be greater than or equal to n, "
-                             f"got n={self.n} and best_of={self.best_of}.")
         if not -2.0 <= self.presence_penalty <= 2.0:
             raise ValueError("presence_penalty must be in [-2, 2], got "
                              f"{self.presence_penalty}.")
