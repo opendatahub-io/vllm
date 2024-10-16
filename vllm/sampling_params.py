@@ -399,6 +399,10 @@ class SamplingParams(
         if self.n > 1:
             raise ValueError("n must be 1 when using greedy sampling, "
                              f"got {self.n}.")
+        assert isinstance(self.best_of, int)
+        if self.best_of > 1:
+            raise ValueError("best_of must be 1 when using greedy sampling, "
+                             f"got {self.best_of}.")
 
     def update_from_generation_config(
             self,
