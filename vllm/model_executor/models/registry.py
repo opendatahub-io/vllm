@@ -86,9 +86,10 @@ _TEXT_GENERATION_MODELS = {
 }
 
 _EMBEDDING_MODELS = {
+    "BertModel": ("bert", "BertEmbeddingModel"),
+    "Gemma2Model": ("gemma2_embedding", "Gemma2EmbeddingModel"),
     "MistralModel": ("llama_embedding", "LlamaEmbeddingModel"),
     "Qwen2ForRewardModel": ("qwen2_rm", "Qwen2ForRewardModel"),
-    "Gemma2Model": ("gemma2_embedding", "Gemma2EmbeddingModel"),
 }
 
 _MULTIMODAL_MODELS = {
