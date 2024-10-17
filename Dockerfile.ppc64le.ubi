@@ -1,0 +1,36 @@
+FROM registry.access.redhat.com/ubi9/ubi:latest
+USER root
+
+ENV MAMBA_ROOT_PREFIX=~/micromamba
+ENV PATH=/root/micromamba/bin:$PATH
+ENV CMAKE_PREFIX_PATH=/root/micromamba
+
+RUN dnf install g++ gcc-toolset-12* git protobuf-* bzip2 libtool autoconf -y
+WORKDIR /workspace/
+
+# Install numctl library
+RUN git clone -b v2.0.16 --single-branch https://github.com/numactl/numactl
+RUN cd /workspace/numactl && ./autogen.sh && ./configure && make install
+
+# Install and setup Micromamba
+RUN curl -Ls https://micro.mamba.pm/api/micromamba/linux-ppc64le/latest | tar -xvj bin/micromamba \
+    && mv bin/micromamba /usr/local/bin/ \
+    && micromamba shell init -s bash -r ~/micromamba && source ~/.bashrc \
+    && micromamba activate
+
+# Install dependencies
+RUN micromamba install -y -n base -c https://ftp.osuosl.org/pub/open-ce/1.11.0-p10/ -c defaults python=3.10 torchvision-cpu=0.16.2 rust \
+    && micromamba clean --all --yes
+
+COPY ./ /workspace/vllm
+WORKDIR /workspace/vllm
+
+RUN pip install -v --prefer-binary --extra-index-url https://repo.fury.io/mgiessing \
+        cmake>=3.26 ninja packaging setuptools-scm>=8 wheel jinja2 \
+        torch==2.3.1 \
+        -r requirements-cpu.txt \
+        xformers uvloop==0.20.0
+
+RUN VLLM_TARGET_DEVICE=cpu python3 setup.py develop
+
+ENTRYPOINT ["/root/micromamba/bin/python3", "-m", "vllm.entrypoints.openai.api_server"]
