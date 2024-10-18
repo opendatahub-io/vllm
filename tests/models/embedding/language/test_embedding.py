@@ -2,14 +2,19 @@
 
 Run `pytest tests/models/embedding/language/test_embedding.py`.
 """
+import os
+
 import pytest
 import torch
 import torch.nn.functional as F
 
 MODELS = [
+    "BAAI/bge-base-en-v1.5",
     "intfloat/e5-mistral-7b-instruct",
     "BAAI/bge-multilingual-gemma2",
 ]
+
+ENCODER_MODELS = ["BAAI/bge-base-en-v1.5"]
 
 
 def compare_embeddings(embeddings1, embeddings2):
@@ -29,6 +34,11 @@ def test_models(
     model: str,
     dtype: str,
 ) -> None:
+
+    prior_attn_backend_env = os.getenv("VLLM_ATTENTION_BACKEND", None)
+    if model in ENCODER_MODELS:
+        os.environ["VLLM_ATTENTION_BACKEND"] = "XFORMERS"
+
     # The example_prompts has ending "\n", for example:
     # "Write a short story about a robot that dreams for the first time.\n"
     # sentence_transformers will strip the input texts, see:
@@ -40,7 +50,7 @@ def test_models(
     with hf_runner(model, dtype=dtype, is_embedding_model=True) as hf_model:
         hf_outputs = hf_model.encode(example_prompts)
 
-    with vllm_runner(model, dtype=dtype) as vllm_model:
+    with vllm_runner(model, dtype=dtype, max_model_len=None) as vllm_model:
         vllm_outputs = vllm_model.encode(example_prompts)
 
     similarities = compare_embeddings(hf_outputs, vllm_outputs)
@@ -49,3 +59,9 @@ def test_models(
     assert torch.all((all_similarities <= 1.0 + tolerance)
                      & (all_similarities >= 1.0 - tolerance)
                      ), f"Not all values are within {tolerance} of 1.0"
+
+    if "VLLM_ATTENTION_BACKEND" in os.environ:
+        if prior_attn_backend_env is None:
+            del os.environ["VLLM_ATTENTION_BACKEND"]
+        else:
+            os.environ["VLLM_ATTENTION_BACKEND"] = prior_attn_backend_env
