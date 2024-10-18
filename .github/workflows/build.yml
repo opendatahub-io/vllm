@@ -1,0 +1,47 @@
+name: "Build UBI image"
+
+on:
+  schedule:
+    - cron: "20 4 * * 1" # once a week
+  workflow_dispatch:
+
+  push:
+    branches: [main]
+
+  pull_request:
+
+jobs:
+  build-image:
+    name: "Build UBI image"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and export
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          tags: vllm
+          # outputs: type=oci,dest=/tmp/image.tar
+          outputs: type=docker,dest=/tmp/image.tar
+          file: ./Dockerfile.ubi
+          secrets: |
+            "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}"
+            "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+          build-args: |
+            MAX_JOBS=2
+            NVCC_THREADS=2
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vlm
+          path: /tmp/image.tar
