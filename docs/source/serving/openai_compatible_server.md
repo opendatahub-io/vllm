@@ -168,7 +168,9 @@ from HuggingFace; and you can find an example of this in a `tokenizer_config.jso
 
 If your favorite tool-calling model is not supported, please feel free to contribute a parser & tool use chat template! 
 
-#### Hermes Models (`hermes`)
+### Supported Models
+
+#### Hermes (`hermes`)
 All Nous Research Hermes-series models newer than Hermes 2 Pro should be supported.
 * `NousResearch/Hermes-2-Pro-*`
 * `NousResearch/Hermes-2-Theta-*`
@@ -218,6 +220,20 @@ The `tool_chat_template_llama3_json.jinja` file contains the "official" Llama ch
 it works better with vLLM.
 
 Recommended flags: `--tool-call-parser llama3_json --chat-template examples/tool_chat_template_llama3_json.jinja`
+
+#### IBM Granite models (`granite-20b-fc`)
+
+Supported models:
+* `ibm-granite/granite-20b-functioncalling`
+
+Flags: `--tool-call-parser granite-20b-fc`
+`examples/tool_chat_template_granite_20b_fc.jinja`: this is a modified chat template from the original on Huggingface, which is not vLLM compatible. It blends function description elements from the Hermes template and follows the same system prompt as "Response Generation" mode from [the paper](https://arxiv.org/abs/2407.00121). Parallel function calls are supported.
+
+* `ibm-granite/granite-8b-instruct`
+
+Flags: `--tool-call-parser granite`
+`examples/tool_chat_template_granite.jinja`: this is a modified chat template from the original on Huggingface. Parallel function calls are supported.
+
 
 #### InternLM Models (`internlm`)
 Supported models:
@@ -295,5 +311,5 @@ Then you can use this plugin in the command line like this.
     --tool-parser-plugin <absolute path of the plugin file>
     --tool-call-parser example \
     --chat-template <your chat template> \
-``` 
+```
 
