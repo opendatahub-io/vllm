@@ -232,20 +232,139 @@ def get_config(
     return config
 
 
+def get_hf_file_to_dict(file_name, model, revision):
+    """
+    Downloads a file from the Hugging Face Hub and returns 
+    its contents as a dictionary.
+
+    Parameters:
+    - file_name (str): The name of the file to download.
+    - model (str): The name of the model on the Hugging Face Hub.
+    - revision (str): The specific version of the model. 
+
+    Returns:
+    - config_dict (dict): A dictionary containing 
+    the contents of the downloaded file.
+    """
+    file_path = Path(model) / file_name
+
+    if not file_path.is_file():
+        file_path = Path(hf_hub_download(model, file_name, revision=revision))
+
+    with open(file_path, "r") as file:
+        config_dict = json.load(file)
+
+    return config_dict
+
+
+def get_pooling_config(model, revision='main'):
+    """
+    This function gets the pooling and normalize 
+    config from the model - only applies to 
+    sentence-transformers models. 
+
+    Args:
+        model (str): The name of the Hugging Face model.
+        revision (str, optional): The specific version 
+        of the model to use. Defaults to 'main'.
+
+    Returns:
+        dict: A dictionary containing the pooling 
+        type and whether normalization is used.
+    """
+
+    modules_file_name = "modules.json"
+    modules_dict = get_hf_file_to_dict(modules_file_name, model, revision)
+
+    pooling = next((item for item in modules_dict
+                    if item["type"] == "sentence_transformers.models.Pooling"),
+                   None)
+    normalize = bool(
+        next((item for item in modules_dict
+              if item["type"] == "sentence_transformers.models.Normalize"),
+             False))
+
+    if pooling:
+
+        pooling_file_name = "{}/config.json".format(pooling["path"])
+        pooling_dict = get_hf_file_to_dict(pooling_file_name, model, revision)
+        pooling_type_name = next(
+            (item for item, val in pooling_dict.items() if val is True), None)
+
+        return {"pooling_type": pooling_type_name, "normalize": normalize}
+
+    return None
+
+
+def maybe_register_config_serialize_by_value(trust_remote_code: bool) -> None:
+    """Try to register HF model configuration class to serialize by value
+
+        With trust_remote_code, the config class is typically an instance of a
+        custom class imported from the HF modules cache. The class will not be
+        importable in spawned workers by default (and won't exist at all on
+        other nodes), which breaks serialization of the config.
+
+        In this function we tell the cloudpickle serialization library to pass
+        instances of these generated classes by value instead of by reference,
+        i.e. the class definition is serialized along with its data so that the
+        class module does not need to be importable on the receiving end. This
+        registration only works if the modules cache has already been
+        initialized.
+
+
+        See: https://github.com/cloudpipe/cloudpickle?tab=readme-ov-file#overriding-pickles-serialization-mechanism-for-importable-constructs
+    """
+    if not trust_remote_code:
+        return
+
+    try:
+        import transformers_modules
+    except ImportError:
+        logger.debug("Could not import transformers_modules used for remote"
+                     " code. If remote code is not needed remove"
+                     " `--trust-remote-code`.")
+        return
+
+    try:
+        import cloudpickle
+        cloudpickle.register_pickle_by_value(transformers_modules)
+
+        # ray vendors its own version of cloudpickle
+        from vllm.executor.ray_utils import ray
+        if ray:
+            ray.cloudpickle.register_pickle_by_value(transformers_modules)
+
+        # multiprocessing uses pickle to serialize arguments when using spawn
+        # Here we get pickle to use cloudpickle to serialize ModelConfig objects
+        # that contain instances of the custom config class to avoid
+        # serialization problems if the generated module (and model) has a `.`
+        # in its name
+        import multiprocessing
+        import pickle
+
+        from vllm.config import ModelConfig
+
+        def _reduce_modelconfig(mc: ModelConfig):
+            return (pickle.loads, (cloudpickle.dumps(mc), ))
+
+        multiprocessing.reducer.register(ModelConfig, _reduce_modelconfig)
+
+    except Exception as e:
+        logger.warning(
+            "Unable to register remote classes used by"
+            " trust_remote_code with by-value serialization. This may"
+            " lead to a later error. If remote code is not needed"
+            " remove `--trust-remote-code`",
+            exc_info=e)
+
+
 def load_params_config(model, revision) -> PretrainedConfig:
     # This function loads a params.json config which
     # should be used when loading models in mistral format
 
     config_file_name = "params.json"
 
-    config_path = Path(model) / config_file_name
-
-    if not config_path.is_file():
-        config_path = Path(
-            hf_hub_download(model, config_file_name, revision=revision))
-
-    with open(config_path, "r") as file:
-        config_dict = json.load(file)
+    config_dict = get_hf_file_to_dict(config_file_name, model, revision)
 
     config_mapping = {
         "dim": "hidden_size",
