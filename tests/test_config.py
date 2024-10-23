@@ -39,6 +39,42 @@ def test_incorrect_task(model_id, bad_task):
         )
 
 
+
+@pytest.mark.parametrize(("model_id", "expected_task"), [
+    ("facebook/opt-125m", "generate"),
+    ("intfloat/e5-mistral-7b-instruct", "embedding"),
+])
+def test_auto_task(model_id, expected_task):
+    config = ModelConfig(
+        model_id,
+        task="auto",
+        tokenizer=model_id,
+        tokenizer_mode="auto",
+        trust_remote_code=False,
+        seed=0,
+        dtype="float16",
+    )
+
+    assert config.task == expected_task
+
+
+@pytest.mark.parametrize(("model_id", "bad_task"), [
+    ("facebook/opt-125m", "embedding"),
+    ("intfloat/e5-mistral-7b-instruct", "generate"),
+])
+def test_incorrect_task(model_id, bad_task):
+    with pytest.raises(ValueError, match=r"does not support the .* task"):
+        ModelConfig(
+            model_id,
+            task=bad_task,
+            tokenizer=model_id,
+            tokenizer_mode="auto",
+            trust_remote_code=False,
+            seed=0,
+            dtype="float16",
+        )
+
+
 MODEL_IDS_EXPECTED = [
     ("Qwen/Qwen1.5-7B", 32768),
     ("mistralai/Mistral-7B-v0.1", 4096),
