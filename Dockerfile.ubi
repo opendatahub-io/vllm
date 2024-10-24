@@ -9,8 +9,7 @@ COPY vllm /opt/vllm/lib64/python3.12/site-packages/vllm
 # RUN --mount=type=cache,target=/root/.cache/pip \
 #     pip install vllm-tgis-adapter==0.5.1
 RUN --mount=type=cache,target=/root/.cache/pip \
-    --mount=type=bind,from=build,src=/workspace/dist,target=/workspace/dist \
-    uv pip install $(echo dist/*.whl)'[tensorizer]' git+https://github.com/opendatahub-io/vllm-tgis-adapter@ibm-20241024-adapter
+    pip install git+https://github.com/opendatahub-io/vllm-tgis-adapter@ibm-20241024-adapter
 
 ENV GRPC_PORT=8033 \
     PORT=8000 \
