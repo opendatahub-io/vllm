@@ -83,7 +83,8 @@ class OpenAIServingEmbedding(OpenAIServing):
                          lora_modules=None,
                          prompt_adapters=None,
                          request_logger=request_logger)
-        self._enabled = self._check_embedding_mode(model_config.embedding_mode)
+        self._enabled = self._check_embedding_mode(
+            model_config.task == "embedding")
 
     async def create_embedding(
         self,
@@ -134,9 +135,11 @@ class OpenAIServingEmbedding(OpenAIServing):
             pooling_params = request.to_pooling_params()
 
             prompts = list(
-                self._tokenize_prompt_input_or_inputs(request, tokenizer,
-                                                      request.input,
-                                                      truncate_prompt_tokens))
+                self._tokenize_prompt_input_or_inputs(
+                    request,
+                    tokenizer,
+                    request.input,
+                    truncate_prompt_tokens=truncate_prompt_tokens))
 
             for i, prompt_inputs in enumerate(prompts):
                 request_id_item = f"{request_id}-{i}"

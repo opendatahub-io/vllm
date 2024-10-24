@@ -1,4 +1,3 @@
-import logging
 import math
 import re
 from array import array
@@ -14,16 +13,15 @@ from torch import nn
 from torch.nn import functional as F
 from transformers import PretrainedConfig
 
-import vllm.envs as envs
 from vllm.attention import Attention, AttentionMetadata
-from vllm.attention.selector import (_Backend, backend_name_to_enum,
-                                     get_global_forced_attn_backend)
+from vllm.attention.selector import _Backend
 from vllm.config import CacheConfig, MultiModalConfig
 from vllm.distributed import (get_pp_group, get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size,
                               split_tensor_along_last_dim,
                               tensor_model_parallel_all_gather)
-from vllm.inputs import INPUT_REGISTRY, InputContext, LLMInputs
+from vllm.inputs import (INPUT_REGISTRY, DecoderOnlyInputs, InputContext,
+                         token_inputs)
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.activation import QuickGELU, SiluAndMul
 from vllm.model_executor.layers.layernorm import RMSNorm
@@ -32,22 +30,21 @@ from vllm.model_executor.layers.linear import (ColumnParallelLinear,
                                                QKVParallelLinear,
                                                RowParallelLinear)
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
-from vllm.model_executor.layers.quantization.base_config import (
-    QuantizationConfig)
+from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.rotary_embedding import get_rope
 from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
-from vllm.model_executor.models.interfaces import SupportsMultiModal
-from vllm.model_executor.models.utils import make_layers
 from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalInputs
-from vllm.platforms import current_platform
+from vllm.multimodal.utils import cached_get_tokenizer
 from vllm.sequence import (VLLM_TOKEN_ID_ARRAY_TYPE, IntermediateTensors,
                            SequenceData)
 from vllm.transformers_utils.processor import get_processor
 
-log = logging.getLogger(__name__)
+from .interfaces import SupportsMultiModal, SupportsPP
+from .utils import (get_vit_attn_backend,
+                    make_empty_intermediate_tensors_factory, make_layers)
 
 # TODO: hard-coded for now. Consider making it configurable.
 VIT_LAYERS = [-2, -9]
@@ -189,35 +186,12 @@ class MultiHeadDotProductAttention(nn.Module):
         )
 
         # Detect attention implementation.
-        selected_backend: Optional[_Backend] = get_global_forced_attn_backend()
-        if selected_backend is None:
-            backend_by_env_var: Optional[str] = envs.VLLM_ATTENTION_BACKEND
-            if backend_by_env_var is not None:
-                selected_backend = backend_name_to_enum(backend_by_env_var)
-        if selected_backend is None:
-            # For Volta and Turing GPUs, use xformers instead.
-            device_available = current_platform.get_device_capability()[0] >= 8
-            if device_available:
-                from transformers.utils import is_flash_attn_2_available
-                if is_flash_attn_2_available():
-                    self._use_flash_attn = True
-                else:
-                    log.warning(
-                        "Current Molmo implementation has a bug with "
-                        "`vllm-flash-attn` inside vision module, so we use "
-                        "xformers backend instead. You can run `pip install "
-                        "flash-attn to use flash-attention backend.")
-                    self._use_flash_attn = False
-            else:
-                self._use_flash_attn = False
-        else:
-            if selected_backend == _Backend.FLASH_ATTN:
-                self._use_flash_attn = True
-            elif selected_backend == _Backend.XFORMERS:
-                self._use_flash_attn = False
-            else:
-                raise RuntimeError(
-                    f"Molmo does not support {selected_backend} backend now.")
+        self.attn_backend: _Backend = get_vit_attn_backend()
+        if self.attn_backend not in {
+                _Backend.FLASH_ATTN, _Backend.TORCH_SDPA, _Backend.XFORMERS
+        }:
+            raise RuntimeError(
+                f"Molmo does not support {self.attn_backend} backend now.")
 
     def forward(self,
                 inputs_q: torch.Tensor,
@@ -239,10 +213,15 @@ class MultiHeadDotProductAttention(nn.Module):
         xk = xk.view(*kv_shape)
         xv = xv.view(*kv_shape)
 
-        if self._use_flash_attn:
+        if self.attn_backend == _Backend.FLASH_ATTN:
             from flash_attn import flash_attn_func
             output = flash_attn_func(xq, xk, xv, dropout_p=0.0, causal=False)
-        else:
+        elif self.attn_backend == _Backend.TORCH_SDPA:
+            xq, xk, xv = (rearrange(x, "b s h d -> b h s d")
+                          for x in (xq, xk, xv))
+            output = F.scaled_dot_product_attention(xq, xk, xv)
+            output = rearrange(output, "b h s d -> b s h d ")
+        elif self.attn_backend == _Backend.XFORMERS:
             from xformers import ops as xops
             output = xops.memory_efficient_attention_forward(xq, xk, xv, p=0)
 
@@ -765,6 +744,10 @@ class MolmoModel(nn.Module):
         assert config.layer_norm_type == "rms"
         self.norm = RMSNorm(config.hidden_size, config.layer_norm_eps)
 
+        self.make_empty_intermediate_tensors = (
+            make_empty_intermediate_tensors_factory(
+                ["hidden_states", "residual"], config.hidden_size))
+
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -945,13 +928,19 @@ def pad_images(
     return images, image_input_idx, image_masks
 
 
-def input_processor_for_molmo(ctx: InputContext, llm_inputs: LLMInputs):
-    prompt = llm_inputs["prompt"]
-    multi_modal_data = llm_inputs.get("multi_modal_data")
-    image = multi_modal_data.get("image")
+def input_processor_for_molmo(ctx: InputContext, inputs: DecoderOnlyInputs):
+    prompt = inputs.get("prompt")
+    multi_modal_data = inputs.get("multi_modal_data")
+    image = None if multi_modal_data is None else multi_modal_data.get("image")
+
     processor = cached_get_processor(ctx.model_config.model,
                                      trust_remote_code=True,
                                      revision=ctx.model_config.code_revision)
+
+    model_config = ctx.model_config
+    tokenizer = cached_get_tokenizer(
+        model_config.tokenizer,
+        trust_remote_code=model_config.trust_remote_code)
 
     # NOTE: message formatting for raw text prompt is only applied for
     # offline inference; for online inference, the prompt is always in
@@ -962,9 +951,7 @@ def input_processor_for_molmo(ctx: InputContext, llm_inputs: LLMInputs):
     elif prompt is not None:
         out = processor.process(prompt, image)
     else:
-        out = processor.process(None,
-                                image,
-                                tokens=llm_inputs["prompt_token_ids"])
+        out = processor.process(None, image, tokens=inputs["prompt_token_ids"])
 
     image_processor = processor.image_processor
     max_total_crops = 1 + image_processor.max_crops
@@ -1017,9 +1004,13 @@ def input_processor_for_molmo(ctx: InputContext, llm_inputs: LLMInputs):
 
     multi_modal_data = dict(image=image_data)
 
-    return LLMInputs(
+    prompt = inputs.get("prompt")
+    if prompt is None:
+        prompt = tokenizer.decode(out["input_ids"])
+
+    return token_inputs(
         prompt_token_ids=out["input_ids"],
-        prompt=llm_inputs["prompt"],
+        prompt=prompt,
         multi_modal_data=multi_modal_data,
     )
 
@@ -1028,7 +1019,7 @@ def input_processor_for_molmo(ctx: InputContext, llm_inputs: LLMInputs):
 @MULTIMODAL_REGISTRY.register_max_image_tokens(get_max_molmo_image_tokens)
 @INPUT_REGISTRY.register_dummy_data(dummy_data_for_molmo)
 @INPUT_REGISTRY.register_input_processor(input_processor_for_molmo)
-class MolmoForCausalLM(nn.Module, SupportsMultiModal):
+class MolmoForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
 
     def __init__(
         self,
@@ -1059,6 +1050,9 @@ class MolmoForCausalLM(nn.Module, SupportsMultiModal):
         self.logits_processor = LogitsProcessor(config.embedding_size
                                                 or config.vocab_size)
         self.sampler = Sampler()
+
+        self.make_empty_intermediate_tensors = (
+            self.model.make_empty_intermediate_tensors)
 
     def _parse_and_validate_image_input(
         self,
@@ -1143,31 +1137,36 @@ class MolmoForCausalLM(nn.Module, SupportsMultiModal):
         positions: torch.LongTensor,
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
+        intermediate_tensors: Optional[IntermediateTensors] = None,
         **kwargs: object,
     ) -> SamplerOutput:
-
-        image_input = self._parse_and_validate_image_input(**kwargs)
-
-        if image_input is not None:
-            inputs_embeds = self.model.embed_tokens(input_ids)
-            image_features = self._process_image_input(image_input)
-
-            inputs_embeds = self._merge_multimodal_embeddings(
-                inputs_embeds,
-                image_features,
-                image_input["image_input_idx"],
-                image_input["seq_len"],
-            )
-
+        if intermediate_tensors is not None:
             input_ids = None
-        else:
             inputs_embeds = None
+        else:
+            image_input = self._parse_and_validate_image_input(**kwargs)
+
+            if image_input is not None:
+                inputs_embeds = self.model.embed_tokens(input_ids)
+                image_features = self._process_image_input(image_input)
+
+                inputs_embeds = self._merge_multimodal_embeddings(
+                    inputs_embeds,
+                    image_features,
+                    image_input["image_input_idx"],
+                    image_input["seq_len"],
+                )
+
+                input_ids = None
+            else:
+                inputs_embeds = None
 
         hidden_states = self.model(
             input_ids=input_ids,
             positions=positions,
             kv_caches=kv_caches,
             attn_metadata=attn_metadata,
+            intermediate_tensors=intermediate_tensors,
             inputs_embeds=inputs_embeds,
         )
 
