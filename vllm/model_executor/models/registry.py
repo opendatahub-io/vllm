@@ -47,12 +47,14 @@ _TEXT_GENERATION_MODELS = {
     "GraniteMoeForCausalLM": ("granitemoe", "GraniteMoeForCausalLM"),
     "InternLMForCausalLM": ("llama", "LlamaForCausalLM"),
     "InternLM2ForCausalLM": ("internlm2", "InternLM2ForCausalLM"),
+    "InternLM2VEForCausalLM": ("internlm2_ve", "InternLM2VEForCausalLM"),
     "JAISLMHeadModel": ("jais", "JAISLMHeadModel"),
     "JambaForCausalLM": ("jamba", "JambaForCausalLM"),
     "LlamaForCausalLM": ("llama", "LlamaForCausalLM"),
     # For decapoda-research/llama-*
     "LLaMAForCausalLM": ("llama", "LlamaForCausalLM"),
     "MambaForCausalLM": ("mamba", "MambaForCausalLM"),
+    "FalconMambaForCausalLM": ("mamba", "MambaForCausalLM"),
     "MistralForCausalLM": ("llama", "LlamaForCausalLM"),
     "MixtralForCausalLM": ("mixtral", "MixtralForCausalLM"),
     "QuantMixtralForCausalLM": ("mixtral_quant", "MixtralForCausalLM"),
@@ -86,9 +88,15 @@ _TEXT_GENERATION_MODELS = {
 }
 
 _EMBEDDING_MODELS = {
-    "MistralModel": ("llama_embedding", "LlamaEmbeddingModel"),
+    # [Text-only]
+    "BertModel": ("bert", "BertEmbeddingModel"),
+    "RobertaModel": ("roberta", "RobertaEmbeddingModel"),
+    "XLMRobertaModel": ("roberta", "RobertaEmbeddingModel"),
+    "Gemma2Model": ("gemma2", "Gemma2EmbeddingModel"),
+    "MistralModel": ("llama", "LlamaEmbeddingModel"),
     "Qwen2ForRewardModel": ("qwen2_rm", "Qwen2ForRewardModel"),
-    "Gemma2Model": ("gemma2_embedding", "Gemma2EmbeddingModel"),
+    # [Multimodal]
+    "Phi3VForCausalLM": ("phi3v", "Phi3VForCausalLM"),
 }
 
 _MULTIMODAL_MODELS = {
