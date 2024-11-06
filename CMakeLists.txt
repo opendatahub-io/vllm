@@ -49,13 +49,8 @@ set(HIP_SUPPORTED_ARCHS "gfx906;gfx908;gfx90a;gfx940;gfx941;gfx942;gfx1030;gfx11
 # requirements.txt files and should be kept consistent.  The ROCm torch
 # versions are derived from Dockerfile.rocm
 #
-<<<<<<< HEAD
-set(TORCH_SUPPORTED_VERSION_CUDA "2.4.0")
-set(TORCH_SUPPORTED_VERSION_ROCM "2.6.0")
-=======
 set(TORCH_SUPPORTED_VERSION_CUDA "2.5.1")
 set(TORCH_SUPPORTED_VERSION_ROCM "2.5.1")
->>>>>>> 93dee88f6b0ff28c2e8b79d638b4e56d58128927
 
 #
 # Try to find python package with an executable that exactly matches
