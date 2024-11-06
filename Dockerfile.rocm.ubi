@@ -250,7 +250,7 @@ USER root
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,from=build_vllm,src=/workspace/dist,target=/install/vllm/ \
-    uv pip install /install/vllm/*.whl vllm-tgis-adapter==0.5.3
+    uv pip install /install/vllm/*.whl git+https://github.com/opendatahub-io/vllm-tgis-adapter@ibm-20241106-adapter
 
 ENV GRPC_PORT=8033 \
     PORT=8000 \
