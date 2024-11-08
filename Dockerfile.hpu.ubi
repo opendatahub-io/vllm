@@ -10,7 +10,7 @@ RUN dnf -y update --best --allowerasing --skip-broken && dnf clean all
 
 WORKDIR /workspace
 
-## Python Installer #################################################################
+### Python Installer #################################################################
 FROM habana-base as python-install
 
 ARG PYTHON_VERSION=3.11
