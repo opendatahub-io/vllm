@@ -156,6 +156,12 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
         CMAKE_BUILD_TYPE=Release \
     python3 setup.py bdist_wheel --dist-dir=dist
 
+RUN --mount=type=cache,target=/root/.cache/pip \
+    git clone https://github.com/ROCm/xformers.git && \
+    cd xformers && \
+    git submodule update --init --recursive && \
+    PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} python3 setup.py install
+
 #################### libsodium Build IMAGE ####################
 FROM rocm_base as libsodium-builder
 
@@ -246,6 +252,12 @@ ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
 FROM vllm-openai as vllm-grpc-adapter
 
 USER root
+
+RUN rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    rpm -ql epel-release && \
+    microdnf -y update && \
+    microdnf -y install git && \
+    microdnf clean all
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cache/uv \
