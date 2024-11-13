@@ -253,15 +253,15 @@ FROM vllm-openai as vllm-grpc-adapter
 
 USER root
 
-RUN rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
-    rpm -ql epel-release && \
+RUN if ! rpm -q epel-release; then \
+        rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm; \
+    fi && \
     microdnf -y update && \
-    microdnf -y install git && \
+    microdnf -y install git gcc-c++ make && \
     microdnf clean all
-
+    
 RUN --mount=type=cache,target=/root/.cache/pip \
-    --mount=type=cache,target=/root/.cache/uv \
-    uv pip install "git+https://github.com/opendatahub-io/vllm-tgis-adapter@ibm-20241106-adapter"
+    pip install git+https://github.com/opendatahub-io/vllm-tgis-adapter@ibm-20241106-adapter
 
 ENV GRPC_PORT=8033 \
     PORT=8000 \
