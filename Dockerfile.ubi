@@ -200,14 +200,18 @@ COPY examples/*.jinja /app/data/template/
 USER 2000
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
 
-
 FROM vllm-openai as vllm-grpc-adapter
 
 USER root
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=bind,from=build,src=/workspace/dist,target=/workspace/dist \
-    uv pip install $(echo dist/*.whl)'[tensorizer]' vllm-tgis-adapter==0.5.3
+    uv pip install $(echo /workspace/dist/*.whl)'[tensorizer]'  --verbose && \
+    uv pip install \
+        "git+https://github.com/opendatahub-io/vllm-tgis-adapter@ibm-20241106-adapter" --verbose
+
+RUN --mount=type=bind,from=build,src=/workspace/dist,target=/workspace/dist \
+    echo "Local dir and dist:" && pwd && ls -l /workspace/dist
 
 ENV GRPC_PORT=8033 \
     PORT=8000 \
