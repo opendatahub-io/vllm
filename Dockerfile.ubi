@@ -212,10 +212,12 @@ USER root
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=bind,from=build,src=/workspace/dist,target=/workspace/dist \
-    uv pip install $(echo /workspace/dist/*.whl)'[tensorizer]' && \
-    uv pip install vllm-tgis-adapter==0.5.3 
-#    uv pip install \
-#        "git+https://github.com/opendatahub-io/vllm-tgis-adapter@ibm-20241106-adapter"
+    uv pip install $(echo /workspace/dist/*.whl)'[tensorizer]'
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    uv pip install "git+https://github.com/opendatahub-io/vllm-tgis-adapter@ibm-20241106-adapter"
+
+RUN pip install --no-cache-dir "transformers @ git+https://github.com/fabianlim/transformers.git@hybrid-mamba"
 
 RUN --mount=type=bind,from=build,src=/workspace/dist,target=/workspace/dist \
     echo "Local dir and dist:" && pwd && ls -l /workspace/dist

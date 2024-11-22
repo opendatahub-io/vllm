@@ -16,6 +16,8 @@ from vllm.model_executor.layers.linear import (QKVParallelLinear,
                                                RowParallelLinear)
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.mamba.mamba_mixer import MambaMixer
+from vllm.model_executor.layers.mamba.mamba_mixer2 import MambaMixer2
+from vllm.model_executor.layers.rotary_embedding import get_rope
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
 from vllm.model_executor.layers.vocab_parallel_embedding import (
@@ -95,6 +97,10 @@ class JambaMLP(JambaMoE):
                          tp_size=tp_size,
                          quant_config=quant_config)
 
+MAMBA_MIXER_CLASSES = {
+    'v1': MambaMixer,
+    'v2': MambaMixer2,
+}
 
 class JambaMambaDecoderLayer(nn.Module):
 
@@ -105,7 +111,8 @@ class JambaMambaDecoderLayer(nn.Module):
                  quant_config: Optional[QuantizationConfig] = None) -> None:
         super().__init__()
         self.config = config
-        self.mamba = MambaMixer(hidden_size= config.hidden_size,
+        mixer_cls = MAMBA_MIXER_CLASSES[self.config.mamba_version]
+        self.mamba = mixer_cls(hidden_size= config.hidden_size,
                                 ssm_state_size = config.mamba_d_state,
                                 conv_kernel_size = config.mamba_d_conv,
                                 intermediate_size = config.mamba_expand *\
@@ -155,6 +162,9 @@ class JambaAttentionDecoderLayer(nn.Module):
         self,
         config: JambaConfig,
         layer_idx: int,
+        attn_rotary_emb: int = 64,
+        rope_theta: float = 10000,
+        max_position_embeddings: int = 8192,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
     ) -> None:
@@ -178,6 +188,19 @@ class JambaAttentionDecoderLayer(nn.Module):
         self.q_size = self.num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
         self.scaling = self.head_dim**-0.5
+        self.rope_theta = rope_theta
+        self.max_position_embeddings = max_position_embeddings
+
+        self.rotary_emb = None
+        if attn_rotary_emb:
+            self.rotary_emb = get_rope(
+                self.head_dim,
+                rotary_dim=attn_rotary_emb,
+                max_position=max_position_embeddings,
+                base=rope_theta,
+                rope_scaling=None,
+                is_neox_style=True,
+            )
 
         self.qkv_proj = QKVParallelLinear(
             config.hidden_size,
@@ -218,6 +241,8 @@ class JambaAttentionDecoderLayer(nn.Module):
     ) -> torch.Tensor:
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        if self.rotary_emb:
+            q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         output, _ = self.o_proj(attn_output)
         return output
@@ -309,19 +334,17 @@ class JambaModel(nn.Module):
         else:
             hidden_states = self.get_input_embeddings(input_ids)
         residual = None
+        num_attn = 0
         for i in range(len(self.layers)):
             layer = self.layers[i]
             kv_cache = None
-            layer_mamba_cache_params = None
             if isinstance(layer, JambaAttentionDecoderLayer):
-                kv_cache = kv_caches[(i - self.config.attn_layer_offset) //
-                                     self.config.attn_layer_period]
+                kv_cache = kv_caches[num_attn]
+                num_attn += 1
+
+            layer_mamba_cache_params = None
             if isinstance(layer, JambaMambaDecoderLayer):
-                current_state_layer = i - (1 +
-                                           (i - self.config.attn_layer_offset)
-                                           // self.config.attn_layer_period)
-                layer_mamba_cache_params = mamba_cache_params.at_layer_idx(
-                    current_state_layer)
+                layer_mamba_cache_params = mamba_cache_params.at_layer_idx(i - num_attn)
 
             hidden_states, residual = layer(
                 positions=positions,
@@ -422,6 +445,7 @@ class JambaForCausalLM(nn.Module, HasInnerState, SupportsLoRA):
         hidden_states = self.model(input_ids, positions, kv_caches,
                                    attn_metadata, mamba_cache_params,
                                    inputs_embeds)
+
         return hidden_states
 
     def copy_inputs_before_cuda_graphs(self, input_buffers, **kwargs):
@@ -435,14 +459,38 @@ class JambaForCausalLM(nn.Module, HasInnerState, SupportsLoRA):
             self) -> Tuple[Tuple[int, int], Tuple[int, int]]:
         world_size = get_tensor_model_parallel_world_size()
         hidden_size = self.config.hidden_size
-        conv_state_shape = (
-            self.config.mamba_expand * hidden_size // world_size,
-            self.config.mamba_d_conv - 1,
-        )
-        temporal_state_shape = (
-            self.config.mamba_expand * hidden_size // world_size,
-            self.config.mamba_d_state,
-        )
+
+        conv_state_shape, temporal_state_shape = None, None
+
+        intermediate_size = self.config.mamba_expand * hidden_size
+
+        if self.config.mamba_version == "v1":
+            conv_state_shape = (
+                intermediate_size // world_size,
+                self.config.mamba_d_conv - 1,
+            )
+            temporal_state_shape = (
+                intermediate_size // world_size,
+                self.config.mamba_d_state,
+            )
+
+        if self.config.mamba_version == "v2":
+            conv_dim = (
+                intermediate_size + 
+                2 * self.config.mamba_n_groups * self.config.mamba_d_state
+            )
+            conv_state_shape = (
+                conv_dim // world_size,
+                self.config.mamba_d_conv - 1,
+            )
+            # These are not TP-ed as they depend on A, dt_bias, D
+            # - they are typically small
+            #   e.g., (h_heads, d_head, d_state) = (128, 64, 128)
+            temporal_state_shape = (
+                self.config.mamba_n_heads, 
+                self.config.mamba_d_head,
+                self.config.mamba_d_state,
+            )
         return conv_state_shape, temporal_state_shape
 
     def compute_logits(
