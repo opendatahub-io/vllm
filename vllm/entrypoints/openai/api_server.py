@@ -29,10 +29,12 @@ from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.multiprocessing.client import MQLLMEngineClient
 from vllm.engine.multiprocessing.engine import run_mp_engine
 from vllm.engine.protocol import EngineClient
+from vllm.entrypoints.chat_utils import load_chat_template
 from vllm.entrypoints.launcher import serve_http
 from vllm.entrypoints.logger import RequestLogger
 from vllm.entrypoints.openai.cli_args import (make_arg_parser,
                                               validate_parsed_serve_args)
+from vllm.entrypoints.openai.fim import get_supported_fim_encoders
 # yapf conflicts with isort for this block
 # yapf: disable
 from vllm.entrypoints.openai.protocol import (ChatCompletionRequest,
@@ -529,6 +531,9 @@ def init_app_state(
     state.engine_client = engine_client
     state.log_stats = not args.disable_log_stats
 
+    resolved_chat_template = load_chat_template(args.chat_template)
+    logger.info("Using supplied chat template:\n%s", resolved_chat_template)
+
     state.openai_serving_chat = OpenAIServingChat(
         engine_client,
         model_config,
@@ -537,7 +542,8 @@ def init_app_state(
         lora_modules=args.lora_modules,
         prompt_adapters=args.prompt_adapters,
         request_logger=request_logger,
-        chat_template=args.chat_template,
+        chat_template=resolved_chat_template,
+        chat_template_content_format=args.chat_template_content_format,
         return_tokens_as_token_ids=args.return_tokens_as_token_ids,
         enable_auto_tools=args.enable_auto_tool_choice,
         tool_parser=args.tool_call_parser,
@@ -551,13 +557,15 @@ def init_app_state(
         prompt_adapters=args.prompt_adapters,
         request_logger=request_logger,
         return_tokens_as_token_ids=args.return_tokens_as_token_ids,
+        fim_encoder=args.fim,
     ) if model_config.task == "generate" else None
     state.openai_serving_embedding = OpenAIServingEmbedding(
         engine_client,
         model_config,
         base_model_paths,
         request_logger=request_logger,
-        chat_template=args.chat_template,
+        chat_template=resolved_chat_template,
+        chat_template_content_format=args.chat_template_content_format,
     ) if model_config.task == "embedding" else None
     state.openai_serving_tokenization = OpenAIServingTokenization(
         engine_client,
@@ -565,7 +573,8 @@ def init_app_state(
         base_model_paths,
         lora_modules=args.lora_modules,
         request_logger=request_logger,
-        chat_template=args.chat_template,
+        chat_template=resolved_chat_template,
+        chat_template_content_format=args.chat_template_content_format,
     )
 
 
@@ -588,11 +597,19 @@ async def run_server(args, **uvicorn_kwargs) -> None:
     if args.tool_parser_plugin and len(args.tool_parser_plugin) > 3:
         ToolParserManager.import_tool_parser(args.tool_parser_plugin)
 
-    valide_tool_parses = ToolParserManager.tool_parsers.keys()
-    if args.enable_auto_tool_choice \
-        and args.tool_call_parser not in valide_tool_parses:
-        raise KeyError(f"invalid tool call parser: {args.tool_call_parser} "
-                       f"(chose from {{ {','.join(valide_tool_parses)} }})")
+    if args.enable_auto_tool_choice:
+        valid_tool_parsers = ToolParserManager.tool_parsers
+        if args.tool_call_parser not in valid_tool_parsers:
+            raise KeyError(
+                f"invalid tool call parser: {args.tool_call_parser} "
+                f"(chose from {{ {','.join(valid_tool_parsers.keys())} }})")
+
+    if args.fim is not None:
+        valid_fim_encoders = get_supported_fim_encoders()
+        if args.fim not in valid_fim_encoders:
+            raise KeyError(
+                f"invalid FIM encoder: {args.fim} "
+                f"(chose from {{ {','.join(valid_fim_encoders)} }})")
 
     # workaround to make sure that we bind the port before the engine is set up.
     # This avoids race conditions with ray.
