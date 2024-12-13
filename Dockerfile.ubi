@@ -42,15 +42,35 @@ FROM python-install as cuda-base
 RUN curl -Lo /etc/yum.repos.d/cuda-rhel9.repo \
         https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo
 
+# Install necessary packages to build numactl from source
+RUN microdnf install -y autoconf automake libtool make rpm-build
+
+# Download the numactl source RPM to /root directory
+WORKDIR /root
+RUN microdnf download --enablerepo=ubi-9-baseos-source --source numactl.src
+
+# Get NUMACTL_V (just the version part of the RPM file)
+RUN NUMACTL_V=$(ls /root/numactl-* | sed -r 's|/root/numactl-(.+)\.el9\.src\.rpm|\1|') && \
+    echo "########################################### NUMACTL_V is set to $NUMACTL_V" && \
+    rpm -i /root/numactl-${NUMACTL_V}.el9.src.rpm && \
+    rpmbuild -ba /root/rpmbuild/SPECS/numactl.spec  && \
+    rpm -i /root/rpmbuild/RPMS/x86_64/{numactl-libs-${NUMACTL_V}.el9.x86_64.rpm,numactl-${NUMACTL_V}.el9.x86_64.rpm,numactl-devel-${NUMACTL_V}.el9.x86_64.rpm}
+
 RUN microdnf install -y \
-        cuda-nvcc-12-4 cuda-nvtx-12-4 cuda-libraries-devel-12-4 && \
+    cuda-nvcc-12-4 cuda-nvtx-12-4 cuda-libraries-devel-12-4 && \
     microdnf clean all
+
+# Search for numa.h in common locations
+RUN echo "### Searching for numa.h in common directories ###" && \
+    find /usr /usr/local /opt /lib -name numa.h | tee /dev/stderr && \
+    echo "### END OF NUMA.H SEARCH ###"
 
 ENV CUDA_HOME="/usr/local/cuda" \
     PATH="${CUDA_HOME}/bin:${PATH}" \
     LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/extras/CUPTI/lib64:${LD_LIBRARY_PATH}"
 
-## Python cuda base #################################################################
+
+## Python cuda base ############################################################
 FROM cuda-base AS python-cuda-base
 
 ENV VIRTUAL_ENV=/opt/vllm
@@ -82,6 +102,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 ## Builder #####################################################################
 FROM dev AS build
+
+WORKDIR /workspace
 
 # install build dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -121,6 +143,10 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
         CXXFLAGS="$CFLAGS $CXXFLAGS" \
         CMAKE_BUILD_TYPE=Release \
         python3 setup.py bdist_wheel --dist-dir=dist
+
+RUN echo "========== /workspace/dist ==========" && \
+ls -l /workspace/dist && \
+echo "========== /workspace/dist =========="
 
 #################### libsodium Build IMAGE ####################
 FROM base as libsodium-builder
@@ -201,15 +227,20 @@ WORKDIR /home/vllm
 
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
 
-
 FROM vllm-openai as vllm-grpc-adapter
 
 USER root
 
+RUN --mount=type=bind,from=cuda-base,source=/root/rpmbuild/RPMS/x86_64,target=/tmp/rpm/ \
+    rpm -i --nodeps /tmp/rpm/numactl-libs-*.el9.x86_64.rpm
+
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,from=build,src=/workspace/dist,target=/workspace/dist \
-    HOME=/root uv pip install "$(echo /workspace/dist/*.whl)[tensorizer]" vllm-tgis-adapter==0.5.3
+    HOME=/root uv pip install "$(echo /workspace/dist/*.whl)[tensorizer]"  --verbose
+
+RUN pip install git+https://github.com/opendatahub-io/vllm-tgis-adapter@main
+
 
 ENV GRPC_PORT=8033 \
     PORT=8000 \
