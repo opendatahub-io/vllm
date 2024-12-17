@@ -50,8 +50,24 @@ ENV CUDA_HOME="/usr/local/cuda" \
     PATH="${CUDA_HOME}/bin:${PATH}" \
     LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/extras/CUPTI/lib64:${LD_LIBRARY_PATH}"
 
+# Install necessary packages to build numactl from source
+RUN microdnf install -y autoconf automake libtool make rpm-build
+
+# Download the numactl source RPM to /root directory
+WORKDIR /root
+RUN microdnf download --enablerepo=ubi-9-baseos-source --source numactl.src
+
+# Get NUMACTL_V (just the version part of the RPM file)
+RUN NUMACTL_V=$(ls /root/numactl-* | sed -r 's|/root/numactl-(.+)\.el9\.src\.rpm|\1|') && \
+    echo "########################################### NUMACTL_V is set to $NUMACTL_V" && \
+    rpm -i /root/numactl-${NUMACTL_V}.el9.src.rpm && \
+    rpmbuild -ba /root/rpmbuild/SPECS/numactl.spec  && \
+    rpm -i /root/rpmbuild/RPMS/x86_64/{numactl-libs-${NUMACTL_V}.el9.x86_64.rpm,numactl-${NUMACTL_V}.el9.x86_64.rpm,numactl-devel-${NUMACTL_V}.el9.x86_64.rpm}
+
 ## Python cuda base #################################################################
 FROM cuda-base AS python-cuda-base
+
+WORKDIR /workspace
 
 ENV VIRTUAL_ENV=/opt/vllm
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
@@ -205,6 +221,9 @@ ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
 FROM vllm-openai as vllm-grpc-adapter
 
 USER root
+
+RUN --mount=type=bind,from=cuda-base,source=/root/rpmbuild/RPMS/x86_64,target=/tmp/rpm/ \
+    rpm -i --nodeps /tmp/rpm/numactl-libs-*.el9.x86_64.rpm
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cache/uv \
