@@ -14,6 +14,7 @@ import gguf
 import huggingface_hub.constants
 import numpy as np
 import torch
+from fastsafetensors import SafeTensorsFileLoader, SingleGroup
 from huggingface_hub import HfFileSystem, hf_hub_download, snapshot_download
 from safetensors.torch import load_file, safe_open, save_file
 from tqdm.auto import tqdm
@@ -408,6 +409,34 @@ def safetensors_weights_iterator(
             for name in f.keys():  # noqa: SIM118
                 param = f.get_tensor(name)
                 yield name, param
+
+
+def fastsafetensors_weights_iterator(
+    hf_weights_files: List[str]
+) -> Generator[Tuple[str, torch.Tensor], None, None]:
+    """Iterate over the weights in the model safetensor files 
+    using fastsafetensor library."""
+    pg = SingleGroup()
+    if torch.distributed.is_initialized():
+        pg = torch.distributed.group.WORLD
+
+    device = torch.device(f'cuda:{pg.rank()}')
+    weight_files_sub_lists = [
+        hf_weights_files[i:i + pg.size()]
+        for i in range(0, len(hf_weights_files), pg.size())
+    ]
+
+    for f_list in weight_files_sub_lists:
+        loader = SafeTensorsFileLoader(pg, device)
+        rank_file_map = {i: [f] for i, f in enumerate(f_list)}
+        loader.add_filenames(rank_file_map)
+        fb = loader.copy_files_to_device()
+        keys = list(fb.key_to_rank_lidx.keys())
+        for k in keys:
+            t = fb.get_tensor(k)
+            yield k, t
+        fb.close()
+        loader.close()
 
 
 def pt_weights_iterator(
