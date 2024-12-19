@@ -52,7 +52,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
         torch==2.6.0.dev20241107+rocm${version}\
         torchvision==0.20.0.dev20241107+rocm${version} && \
     # Install libdrm-amdgpu to avoid errors when retrieving device information (amdgpu.ids: No such file or directory)
-    microdnf install -y libdrm-amdgpu && \
+    microdnf install -y amd-smi libdrm-amdgpu && \
     microdnf clean all
 
 
