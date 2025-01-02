@@ -12,6 +12,7 @@ RUN apt-get update -y && apt-get install -y git wget curl vim libnuma-dev libsnd
 RUN micromamba install -y -n base -c https://ftp.osuosl.org/pub/open-ce/1.11.0-p10/ -c defaults python=3.10 torchvision-cpu=0.16.2 rust && micromamba clean --all --yes
 
 COPY ./ /workspace/vllm
+COPY tools/gencert_ray.sh /etc/gencert_ray.sh
 
 WORKDIR /workspace/vllm
 ARG GIT_REPO_CHECK=0

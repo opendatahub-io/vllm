@@ -117,6 +117,8 @@ RUN --mount=type=cache,target=${CCACHE_DIR} \
 FROM base AS final
 # Import the vLLM development directory from the build context
 COPY . .
+COPY tools/gencert_ray.sh /etc/gencert_ray.sh
+
 ARG GIT_REPO_CHECK=0
 RUN --mount=type=bind,source=.git,target=.git \
     if [ "$GIT_REPO_CHECK" != 0 ]; then bash tools/check_repo.sh ; fi

@@ -158,6 +158,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ARG TARGETPLATFORM
 
 COPY requirements-cuda-arm64.txt requirements-cuda-arm64.txt
+COPY tools/gencert_ray.sh /etc/gencert_ray.sh
 
 RUN PYTHON_VERSION_STR=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
     echo "export PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> /etc/environment

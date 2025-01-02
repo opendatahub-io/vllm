@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y \
 
 # Build vLLM.
 COPY . .
+COPY tools/gencert_ray.sh /etc/gencert_ray.sh
+
 ARG GIT_REPO_CHECK=0
 RUN --mount=type=bind,source=.git,target=.git \
     if [ "$GIT_REPO_CHECK" != 0 ]; then bash tools/check_repo.sh; fi
