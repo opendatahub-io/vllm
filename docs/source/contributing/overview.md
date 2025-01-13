@@ -34,10 +34,8 @@ pytest tests/
 ```
 
 ```{note}
-Currently, the repository does not pass the `mypy` tests.
+Currently, the repository is not fully checked by `mypy`.
 ```
-
-# Contribution Guidelines
 
 ## Issues
 
