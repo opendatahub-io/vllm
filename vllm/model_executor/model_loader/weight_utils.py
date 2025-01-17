@@ -454,7 +454,10 @@ def fastsafetensors_weights_iterator(
     ]
 
     for f_list in weight_files_sub_lists:
-        loader = SafeTensorsFileLoader(pg, device)
+        # nogds=True enable the use of fastsafetensors without NVIDIA GDS
+        loader = SafeTensorsFileLoader(pg, device,
+                                       nogds=True,
+                                       debug_log=True)
         rank_file_map = {i: [f] for i, f in enumerate(f_list)}
         loader.add_filenames(rank_file_map)
         fb = loader.copy_files_to_device()
