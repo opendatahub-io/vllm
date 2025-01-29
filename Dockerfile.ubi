@@ -185,7 +185,13 @@ ENV HF_HUB_OFFLINE=1 \
     VLLM_NO_USAGE_STATS=1 \
     OUTLINES_CACHE_DIR=/tmp/outlines \
     NUMBA_CACHE_DIR=/tmp/numba \
-    TRITON_CACHE_DIR=/tmp/triton
+    TRITON_CACHE_DIR=/tmp/triton \
+    # Setup NCCL monitoring with torch
+    # For tensor-parallel workloads, this monitors for NCCL deadlocks when
+    # one rank dies, and tears down the NCCL process groups so that the driver
+    # can cleanly exit.
+    TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=15 \
+    TORCH_NCCL_DUMP_ON_TIMEOUT=0
 
 # setup non-root user for OpenShift
 RUN umask 002 && \
