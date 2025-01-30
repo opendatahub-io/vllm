@@ -62,7 +62,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=bind,source=requirements-common.txt,target=requirements-common.txt \
     --mount=type=bind,source=requirements-cuda.txt,target=requirements-cuda.txt \
     uv pip install \
-        -r requirements-cuda.txt
+        -r requirements-cuda.txt && \
+        pip install xformers==0.0.29.post1 --no-deps
 
 
 ## Development #################################################################
@@ -78,7 +79,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=bind,source=requirements-test.txt,target=requirements-test.txt \
     uv pip install \
         -r requirements-cuda.txt \
-        -r requirements-dev.txt
+        -r requirements-dev.txt && \
+        pip install xformers==0.0.29.post1 --no-deps
 
 ## Builder #####################################################################
 FROM dev AS build
