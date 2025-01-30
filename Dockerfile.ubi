@@ -20,7 +20,7 @@ ENV LANG=C.UTF-8 \
 
 # Some utils for dev purposes - tar required for kubectl cp
 RUN microdnf install -y \
-        which procps findutils tar vim git\
+        which procps findutils tar vim git kmod \
     && microdnf clean all
 
 
@@ -49,6 +49,7 @@ RUN microdnf install -y \
 ENV CUDA_HOME="/usr/local/cuda" \
     PATH="${CUDA_HOME}/bin:${PATH}" \
     LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/extras/CUPTI/lib64:${LD_LIBRARY_PATH}"
+
 
 ## Python cuda base #################################################################
 FROM cuda-base AS python-cuda-base
@@ -79,6 +80,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     uv pip install \
         -r requirements-cuda.txt \
         -r requirements-dev.txt
+
 
 ## Builder #####################################################################
 FROM dev AS build
@@ -112,11 +114,6 @@ ENV VLLM_INSTALL_PUNICA_KERNELS=1
 # Make sure the cuda environment is in the PATH
 ENV PATH=/usr/local/cuda/bin:$PATH
 
-RUN mkdir -p /usr/local/cuda/lib64/stubs && \
-    ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/libcuda.so
-
-ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64/stubs:/usr/local/cuda/lib64:$LD_LIBRARY_PATH"
-
 ENV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
     --mount=type=cache,target=/root/.cache/pip \
@@ -125,8 +122,6 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
     env CFLAGS="-march=haswell" \
         CXXFLAGS="$CFLAGS $CXXFLAGS" \
         CMAKE_BUILD_TYPE=Release \
-        DCMAKE_CUDA_FLAGS="-L/usr/local/cuda/lib64" \
-        LDFLAGS="-L/usr/local/cuda/lib64/stubs" \
         python3 setup.py bdist_wheel --dist-dir=dist
 
 #################### libsodium Build IMAGE ####################
@@ -145,6 +140,7 @@ RUN curl -LO https://github.com/jedisct1/libsodium/releases/download/${LIBSODIUM
 
 RUN CFLAGS="-O3 -Wall -Werror=format-security -Wno-unused-function -Wp,-D_GLIBCXX_ASSERTIONS -fstack-protector-strong -fstack-clash-protection -fcf-protection"\
     ./configure --prefix="/usr/" && make -j $MAX_JOBS && make check
+
 
 ## Release #####################################################################
 FROM python-install AS vllm-openai
@@ -209,6 +205,7 @@ WORKDIR /home/vllm
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
 
 
+## Last layer ##################################################################
 FROM vllm-openai as vllm-grpc-adapter
 
 USER root
