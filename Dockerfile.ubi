@@ -114,6 +114,10 @@ ENV VLLM_INSTALL_PUNICA_KERNELS=1
 # Make sure the cuda environment is in the PATH
 ENV PATH=/usr/local/cuda/bin:$PATH
 
+ENV CUDA_HOME="/usr/local/cuda" \
+    PATH="${CUDA_HOME}/bin:${PATH}" \
+    LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/extras/CUPTI/lib64:${LD_LIBRARY_PATH}"
+
 ENV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
     --mount=type=cache,target=/root/.cache/pip \
