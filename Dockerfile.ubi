@@ -5,6 +5,7 @@ ARG PYTHON_VERSION=3.12
 ARG TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 8.9 9.0+PTX"
 ARG vllm_fa_cmake_gpu_arches='80-real;90-real'
 
+
 ## Base Layer ##################################################################
 FROM registry.access.redhat.com/ubi9/ubi-minimal:${BASE_UBI_IMAGE_TAG} as base
 ARG PYTHON_VERSION
@@ -52,11 +53,21 @@ RUN microdnf install -y \
 
 
 
+
 ## Python cuda base #################################################################
 FROM cuda-base AS python-cuda-base
 
 ENV VIRTUAL_ENV=/opt/vllm
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+# install numactl and common dependencies for fastsafetensors
+RUN microdnf install autoconf automake libtool make rpm-build -y && \
+    microdnf download --source numactl.src && \
+    NUMACTL_V=$(rpm -qp --qf "%{VERSION}-%{RELEASE}\n" numactl-*.rpm | sort -V | tail -n 1) && \
+    rpm -i numactl-${NUMACTL_V}.src.rpm && \
+    rpmbuild -ba /root/rpmbuild/SPECS/numactl.spec && \
+    rpm -i /root/rpmbuild/RPMS/x86_64/{numactl-libs-${NUMACTL_V}.x86_64.rpm,numactl-${NUMACTL_V}.x86_64.rpm,numactl-devel-${NUMACTL_V}.x86_64.rpm} && \
+    microdnf clean all
 
 # install cuda and common dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -81,6 +92,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     uv pip install \
         -r requirements-cuda.txt \
         -r requirements-dev.txt
+
 
 ## Builder #####################################################################
 FROM dev AS build
@@ -124,6 +136,7 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
         CMAKE_BUILD_TYPE=Release \
         python3 setup.py bdist_wheel --dist-dir=dist
 
+
 #################### libsodium Build IMAGE ####################
 FROM base as libsodium-builder
 
@@ -141,6 +154,7 @@ RUN curl -LO https://github.com/jedisct1/libsodium/releases/download/${LIBSODIUM
 RUN CFLAGS="-O3 -Wall -Werror=format-security -Wno-unused-function -Wp,-D_GLIBCXX_ASSERTIONS -fstack-protector-strong -fstack-clash-protection -fcf-protection"\
     ./configure --prefix="/usr/" && make -j $MAX_JOBS && make check
 
+
 ## Release #####################################################################
 FROM python-install AS vllm-openai
 ARG PYTHON_VERSION
@@ -154,6 +168,7 @@ ENV PATH=$VIRTUAL_ENV/bin:$PATH
 ENV LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib/python${PYTHON_VERSION}/site-packages/nvidia/cuda_nvrtc/lib:${LD_LIBRARY_PATH}"
 ENV LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib/python${PYTHON_VERSION}/site-packages/nvidia/cuda_runtime/lib:${LD_LIBRARY_PATH}"
 ENV LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib/python${PYTHON_VERSION}/site-packages/nvidia/nvtx/lib:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib/python${PYTHON_VERSION}/site-packages/nvidia/cufile/lib:${LD_LIBRARY_PATH}"
 
 # Triton needs a CC compiler
 RUN microdnf install -y gcc \
@@ -210,14 +225,21 @@ WORKDIR /home/vllm
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
 
 
+## Last image ##################################################################
 FROM vllm-openai as vllm-grpc-adapter
 
 USER root
 
+# Installing numactl and numactl-libs for fastsafetensors
+RUN --mount=type=bind,from=python-cuda-base,src=/root/rpmbuild/RPMS/x86_64,target=/workspace/RPMS \
+    NUMACTL_V=$(rpm -qp --qf "%{VERSION}-%{RELEASE}\n" /workspace/RPMS/numactl-*.rpm | sort -V | tail -n 1) && \
+    rpm -i /workspace/RPMS/numactl-${NUMACTL_V}.x86_64.rpm /workspace/RPMS/numactl-libs-${NUMACTL_V}.x86_64.rpm
+
+# Ensure correct vLLM version, vllm-tgis-adapter and cufile for fastsafetensors
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,from=build,src=/workspace/dist,target=/workspace/dist \
-    HOME=/root uv pip install "$(echo /workspace/dist/*.whl)[tensorizer]" vllm-tgis-adapter==0.6.0
+    HOME=/root uv pip install "$(echo /workspace/dist/*.whl)[tensorizer]" vllm-tgis-adapter==0.6.0 nvidia-cufile-cu12
 
 ENV GRPC_PORT=8033 \
     PORT=8000 \
