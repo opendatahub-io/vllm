@@ -890,6 +890,26 @@ For more details, please see: <gh-pr:4087#issuecomment-2250397630>
 To use Qwen2.5-VL series models, you have to install Huggingface `transformers` library from source via `pip install git+https://github.com/huggingface/transformers`.
 :::
 
+#### Transcription (`--task transcription`)
+
+Speech2Text models trained specifically for Automatic Speech Recognition.
+
+:::{list-table}
+:widths: 25 25 25 5 5
+:header-rows: 1
+
+- * Architecture
+  * Models
+  * Example HF Models
+  * [LoRA](#lora-adapter)
+  * [PP](#distributed-serving)
+- * `Whisper`
+  * Whisper-based
+  * `openai/whisper-large-v3-turbo`
+  * 🚧
+  * 🚧
+:::
+
 ### Pooling Models
 
 See [this page](pooling-models) for more information on how to use pooling models.
@@ -937,26 +957,6 @@ The following table lists those that are tested in vLLM.
   * `MrLight/dse-qwen2-2b-mrl-v1`
   *
   * ✅︎
-:::
-
-#### Transcription (`--task transcription`)
-
-Speech2Text models trained specifically for Automatic Speech Recognition.
-
-:::{list-table}
-:widths: 25 25 25 5 5
-:header-rows: 1
-
-- * Architecture
-  * Models
-  * Example HF Models
-  * [LoRA](#lora-adapter)
-  * [PP](#distributed-serving)
-- * `Whisper`
-  * Whisper-based
-  * `openai/whisper-large-v3-turbo`
-  * 🚧
-  * 🚧
 :::
 
 _________________
