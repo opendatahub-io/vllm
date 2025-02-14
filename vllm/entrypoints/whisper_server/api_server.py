@@ -112,7 +112,7 @@ async def _generate(prompt, raw_request: Request) -> Response:
     engine = raw_request.app.state.engine
     results_generator = engine.generate(prompt, sampling_params, request_id)
 
-    async def stream_results() -> AsyncGenerator[bytes, None]:
+    async def stream_results() -> AsyncGenerator[str, None]:
         async for request_output in results_generator:
             assert len(request_output.outputs) == 1
             chunk = TranscriptionResponse(text=request_output.outputs[0].text)

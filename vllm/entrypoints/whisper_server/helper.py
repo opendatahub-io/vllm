@@ -28,7 +28,7 @@ TOKENS_PER_SECOND = exact_div(SAMPLE_RATE,
                               N_SAMPLES_PER_TOKEN)  # 20ms per audio token
 
 
-def load_audio_from_bytes(audio_bytes: str, sample_rate: int = SAMPLE_RATE):
+def load_audio_from_bytes(audio_bytes: bytes, sample_rate: int = SAMPLE_RATE):
     """
     Read bytes from audio file as mono waveform, resampling as necessary
 
