@@ -183,7 +183,7 @@ RUN --mount=type=bind,from=libsodium-builder,src=/usr/src/libsodium,target=/usr/
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cache/uv \
     uv pip install \
-        "https://github.com/flashinfer-ai/flashinfer/releases/download/v0.2.0.post2/flashinfer_python-0.2.0.post2+cu124torch2.5-cp312-cp312-linux_x86_64.whl"
+        "https://github.com/flashinfer-ai/flashinfer/releases/download/v0.2.1.post2/flashinfer_python-0.2.1.post2+cu124torch2.6-cp38-abi3-linux_x86_64.whl"
 
 ENV HF_HUB_OFFLINE=1 \
     HOME=/home/vllm \
@@ -236,7 +236,9 @@ ENV GRPC_PORT=8033 \
     # default, but this would be unexpected to users of a hosted model that
     # happens to have spec decoding
     # see: https://github.com/vllm-project/vllm/pull/6485
-    DISABLE_LOGPROBS_DURING_SPEC_DECODING=false
+    DISABLE_LOGPROBS_DURING_SPEC_DECODING=false \
+    # try to use flashinfer
+    VLLM_ATTENTION_BACKEND=FLASHINFER
 
 USER 2000
 ENTRYPOINT ["python3", "-m", "vllm_tgis_adapter", "--uvicorn-log-level=warning"]
