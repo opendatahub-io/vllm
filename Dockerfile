@@ -266,9 +266,6 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 ENV VLLM_USAGE_SOURCE production-docker-image
 
-# redact guided decoding params by default
-ENV VLLM_LOG_FILTER_PATTERNS '["GuidedDecodingParams\\\\([^)]*\\\\)"]'
-
 # define sagemaker first, so it is not default from `docker build`
 FROM vllm-openai-base AS vllm-sagemaker
 
