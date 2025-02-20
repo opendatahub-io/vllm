@@ -9,7 +9,7 @@ repos:
     args: [--in-place, --verbose]
     additional_dependencies: [toml] # TODO: Remove when yapf is upgraded
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.9.3
+  rev: v0.9.7
   hooks:
   - id: ruff
     args: [--output-format, github]
