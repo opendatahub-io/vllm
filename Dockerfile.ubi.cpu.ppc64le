@@ -1,0 +1,256 @@
+# BASE BUILDER IMAGE
+
+FROM registry.access.redhat.com/ubi9/ubi-minimal AS base-builder
+ARG MAX_JOBS
+ARG PYTHON_VERSION=3.12
+RUN  rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    microdnf --setopt=cachedir=/root/.cache/microdnf --nodocs install -y \
+        jq \
+        tar \
+        kmod \
+        git \
+        gcc-toolset-13 \
+        cmake \
+        ninja-build \
+        tk-devel \
+        zlib-devel \
+        xsimd-devel \
+        lcms2-devel \
+        gflags-devel \
+        libraqm-devel \
+        libwebp-devel \
+        libjpeg-devel \
+        rapidjson-devel \
+        boost1.78-devel \
+        re2-devel \
+        numactl-devel \
+        libtiff-devel \
+        openjpeg2 \
+        openssl-devel \
+        libimagequant-devel \
+        libxcb-devel \
+        zeromq-devel \
+        pkg-config \
+        utf8proc \
+        java-17-openjdk-devel \
+        python${PYTHON_VERSION}-devel \
+        python${PYTHON_VERSION}-pip \
+    && rpm -ivh https://mirror.stream.centos.org/9-stream/CRB/ppc64le/os/Packages/utf8proc-devel-2.6.1-4.el9.ppc64le.rpm && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV VENV=/opt/vllm
+ENV PATH=$VENV/bin:/root/.cargo/bin:$PATH
+RUN python${PYTHON_VERSION} -m venv $VENV
+RUN curl -sL https://ftp2.osuosl.org/pub/ppc64el/openblas/latest/Openblas_0.3.29_ppc64le.tar.gz | tar xvf - -C /usr/local
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig/
+ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib64:/usr/local/lib:/usr/lib64:/usr/lib
+
+##################################################
+
+# STAGE TO CLONE SOURCE CODE
+
+FROM base-builder AS builder
+ARG TORCH_VERSION=2.6.0
+ARG TORCHVISION_VERSION=0.20.1
+ARG TORCHAUDIO_VERSION=2.6.0
+ARG PYARROW_VERSION=19.0.1
+ARG OPENCV_VERSION=84
+# gcc-13 does not create a symlink to libatomic.so on ubi-minimal (needed by sentencepiece)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    source /opt/rh/gcc-toolset-13/enable && \
+    ln -sf /usr/lib64/libatomic.so.1 /usr/lib64/libatomic.so && \
+    pip install -v pip setuptools build wheel cython setuptools_scm setuptools_rust packaging \
+    "numpy<2.0" pandas==2.0 pillow scikit_build_core scikit-build meson-python sentencepiece outlines-core
+RUN git clone --recursive https://github.com/pytorch/pytorch.git -b v${TORCH_VERSION} && \
+    git clone --recursive https://github.com/pytorch/vision.git -b v${TORCHVISION_VERSION} && \
+    git clone --recursive https://github.com/pytorch/audio.git -b v${TORCHAUDIO_VERSION} && \
+    git clone --recursive https://github.com/apache/arrow.git -b apache-arrow-${PYARROW_VERSION} && \
+    git clone --recursive https://github.com/opencv/opencv-python.git -b ${OPENCV_VERSION}
+
+##################################################
+
+# TORCH FAMILY BUILD STAGE
+
+FROM builder AS torch-builder
+ARG MAX_JOBS
+ARG BUILD_SOX=1
+ARG BUILD_KALDI=1
+ARG BUILD_RNNT=1
+ARG USE_FFMPEG=0
+ARG TORCHAUDIO_TEST_ALLOW_SKIP_IF_NO_FFMPEG=1
+ARG USE_ROCM=0
+ARG USE_CUDA=0
+ARG TORCHVISION_USE_NVJPEG=0
+ARG TORCHVISION_USE_FFMPEG=0
+ARG _GLIBCXX_USE_CXX11_ABI=1
+RUN --mount=type=cache,target=/root/.cache/pip \
+    source /opt/rh/gcc-toolset-13/enable && \
+    cd pytorch && \
+    pip install -r requirements.txt && \
+    python setup.py develop && \
+    rm -f dist/torch*+git*whl && \
+    MAX_JOBS=${MAX_JOBS:-$(nproc)} python -m build -w --no-isolation
+RUN --mount=type=cache,target=/root/.cache/pip \
+    source /opt/rh/gcc-toolset-13/enable && \
+    cd vision && \
+    MAX_JOBS=${MAX_JOBS:-$(nproc)} python -m build -w --no-isolation
+RUN --mount=type=cache,target=/root/.cache/pip \
+    source /opt/rh/gcc-toolset-13/enable && \
+    cd audio && \
+    MAX_JOBS=${MAX_JOBS:-$(nproc)} python -m build -w --no-isolation
+
+##################################################
+
+# PYARROW BUILD STAGE
+
+FROM builder AS arrow-builder
+ARG MAX_JOBS
+ARG PYARROW_PARALLEL
+RUN --mount=type=cache,target=/root/.cache/pip \
+    source /opt/rh/gcc-toolset-13/enable && \
+    cd arrow/cpp && \
+    mkdir build && \
+    cd build && \
+    cmake -DCMAKE_BUILD_TYPE=release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local   \
+        -Dutf8proc_LIB=/usr/lib64/libutf8proc.so \
+        -Dutf8proc_INCLUDE_DIR=/usr/include \
+        -DARROW_PYTHON=ON \
+        -DARROW_BUILD_TESTS=OFF \
+        -DARROW_JEMALLOC=ON \
+        -DARROW_BUILD_STATIC="OFF" \
+        -DARROW_PARQUET=ON \
+        .. && \
+    make install -j ${MAX_JOBS:-$(nproc)} && \
+    cd ../../python && \
+    PYARROW_PARALLEL=${PYARROW_PARALLEL:-$(nproc)} python setup.py build_ext --build-type=release --bundle-arrow-cpp bdist_wheel
+
+#####################################################
+
+# OPENCV BUILD STAGE
+
+FROM builder AS cv-builder
+ARG ENABLE_HEADLESS=1
+RUN --mount=type=cache,target=/root/.cache/pip \
+    source /opt/rh/gcc-toolset-13/enable && \
+    cd opencv-python && \
+    sed -i 's/"setuptools==59.2.0",/"setuptools<70.0",/g' pyproject.toml && \
+    python -m build -w
+
+#####################################################
+
+# FINAL VLLM STAGE
+FROM registry.access.redhat.com/ubi9/ubi-minimal AS vllm-builder
+ARG MAX_JOBS
+ARG PYTHON_VERSION=3.12
+ARG VLLM_TARGET_DEVICE=cpu
+RUN rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    microdnf --setopt=cachedir=/root/.cache/microdnf --nodocs install -y \
+        jq \
+        tar \
+        kmod \
+        git \
+        gcc-toolset-13 \
+        cmake \
+        ninja-build \
+        tk-devel \
+        zlib-devel \
+        xsimd-devel \
+        lcms2-devel \
+        gflags-devel \
+        libraqm-devel \
+        libwebp-devel \
+        libjpeg-devel \
+        rapidjson-devel \
+        boost1.78-devel \
+        re2-devel \
+        numactl-devel \
+        libtiff-devel \
+        openjpeg2 \
+        openssl-devel \
+        libimagequant-devel \
+        libxcb-devel \
+        zeromq-devel \
+        pkg-config \
+        utf8proc \
+        java-17-openjdk-devel \
+        python${PYTHON_VERSION}-devel \
+        python${PYTHON_VERSION}-pip \
+    && microdnf clean all \
+    && rpm -ivh https://mirror.stream.centos.org/9-stream/CRB/ppc64le/os/Packages/utf8proc-devel-2.6.1-4.el9.ppc64le.rpm \
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    && curl -sL https://ftp2.osuosl.org/pub/ppc64el/openblas/latest/Openblas_0.3.29_ppc64le.tar.gz | tar xvf - -C /usr/local \
+    && ln -sf $(command -v python${PYTHON_VERSION}) /usr/local/bin/python \
+    && ln -sf $(command -v pip${PYTHON_VERSION}) /usr/local/bin/pip
+ENV PATH=/root/.cargo/bin:$PATH
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig/
+ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib64:/usr/local/lib:/usr/lib64:/usr/lib
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,from=torch-builder,source=/pytorch/dist,target=/pytorch,rw \
+--mount=type=bind,from=torch-builder,source=/vision/dist,target=/torchvision,rw \
+    --mount=type=bind,from=torch-builder,source=/audio/dist,target=/torchaudio,rw \
+--mount=type=bind,from=arrow-builder,source=/arrow/python/dist,target=/pyarrow,rw \
+--mount=type=bind,from=cv-builder,source=/opencv-python/dist,target=/opencv,rw \
+    ls -ltr /pytorch && ls -ltr /torchvision && ls -ltr /torchaudio && ls -ltr /pyarrow && ls -ltr /opencv && \
+    source /opt/rh/gcc-toolset-13/enable && \
+    pip install /pytorch/torch*.whl && \
+    pip install /torchvision/torchvision*.whl && \
+    pip install /torchaudio/torchaudio*.whl && \
+    pip install /pyarrow/pyarrow*.whl && \
+    pip install /opencv/opencv*.whl
+
+WORKDIR /workspace
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=bind,src=.,dst=/workspace/vllm,rw \
+    cd vllm && \
+    source /opt/rh/gcc-toolset-13/enable && \
+    python use_existing_torch.py \
+    && ln -sf /usr/lib64/libatomic.so.1 /usr/lib64/libatomic.so && \
+    pip install -v cython setuptools_scm setuptools_rust packaging \
+    "numpy<2.0" pandas==2.0 pillow scikit_build_core scikit-build meson-python sentencepiece outlines-core \
+    && pip install -v -r requirements-build.txt \
+    && pip install -v . --no-build-isolation
+
+# setup non-root user for OpenShift
+RUN umask 002 && \
+    useradd --uid 2000 --gid 0 vllm && \
+    mkdir -p /home/vllm && \
+    chmod g+rwx /home/vllm /usr/src /workspace
+COPY LICENSE /licenses/vllm.md
+COPY examples/*.jinja /app/data/template/
+
+USER 2000
+
+WORKDIR /home/vllm
+
+ENTRYPOINT ["python", "-m", "vllm.entrypoints.openai.api_server"]
+
+#############################################################
+
+# VLLM TGIS ADAPTER STAGE
+
+FROM vllm-builder as vllm-grpc-adapter
+ARG VLLM_TARGET_DEVICE=cpu
+USER root
+
+# Vllm-tgis-adapter 0.6.2 has an issue 
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/uv \
+    source /opt/rh/gcc-toolset-13/enable && \
+    git clone -b 0.6.2 https://github.com/opendatahub-io/vllm-tgis-adapter.git && cd vllm-tgis-adapter && git cherry-pick --no-commit 178d4bafcf6cb2ff8d8088d56ecc167572c83329 \
+    && pip install build && \
+    HOME=/root GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1 python -m build -w && \
+    pip install dist/*.whl && cd .. && rm -rf vllm-tgis-adapter
+
+ENV GRPC_PORT=8033 \
+    PORT=8000 \
+    # As an optimization, vLLM disables logprobs when using spec decoding by
+    # default, but this would be unexpected to users of a hosted model that
+    # happens to have spec decoding
+    # see: https://github.com/vllm-project/vllm/pull/6485
+    DISABLE_LOGPROBS_DURING_SPEC_DECODING=false
+
+USER 2000
+
+ENTRYPOINT ["python", "-m", "vllm_tgis_adapter", "--uvicorn-log-level=warning"]
