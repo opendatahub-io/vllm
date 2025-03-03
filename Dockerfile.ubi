@@ -1,1 +1,5 @@
 FROM quay.io/wxpe/vllm:ibm-20250221 as vllm-grpc-adapter
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/uv \
+    uv pip install -U lm-format-enforcer
