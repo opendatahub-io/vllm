@@ -222,6 +222,7 @@ ENV HF_HUB_OFFLINE=1 \
     VLLM_USAGE_SOURCE=production-docker-image \
     VLLM_WORKER_MULTIPROC_METHOD=fork \
     VLLM_NO_USAGE_STATS=1 \
+    VLLM_LOG_FILTER_PATTERNS='["GuidedDecodingParams\\\\([^)]*\\\\)"]' \
     # Silences the HF Tokenizers warning
     TOKENIZERS_PARALLELISM=false  \
     RAY_EXPERIMENTAL_NOSET_ROCR_VISIBLE_DEVICES=1 \
