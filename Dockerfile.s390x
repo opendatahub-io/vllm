@@ -121,6 +121,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,from=pyarrow,source=/tmp/arrow/python/dist,target=/tmp/arrow-wheels \
     --mount=type=bind,from=torch-vision,source=/tmp/vision/dist,target=/tmp/vision-wheels/ \
      sed -i '/^torch/d' requirements-build.txt && \
+     sed -i '/^numba/d' requirements-common.txt && \
      ARROW_WHL_FILE=$(ls /tmp/arrow-wheels/pyarrow-*.whl | head -n 1) && \
      VISION_WHL_FILE=$(ls /tmp/vision-wheels/*.whl | head -n 1) && \
     uv pip install -v \    
@@ -145,8 +146,7 @@ ENV HF_HUB_OFFLINE=1 \
     VLLM_USAGE_SOURCE=production-docker-image \
     VLLM_WORKER_MULTIPROC_METHOD=fork \
     VLLM_NO_USAGE_STATS=1 \
-    OUTLINES_CACHE_DIR=/tmp/outlines \
-    NUMBA_CACHE_DIR=/tmp/numba  
+    OUTLINES_CACHE_DIR=/tmp/outlines
 
 # setup non-root user for vllm
 RUN umask 002 && \
