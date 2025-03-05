@@ -89,7 +89,7 @@ FROM python-install AS torch-vision
 ARG TORCH_VERSION=2.7.0.dev20250304
 ARG TORCH_VISION_VERSION=v0.20.1
 WORKDIR /tmp
-RUN -mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv \
     git clone https://github.com/pytorch/vision.git && \
     cd vision && \
     git checkout $TORCH_VISION_VERSION && \
