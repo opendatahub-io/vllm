@@ -32,22 +32,28 @@ RUN dnf install -y https://mirror.stream.centos.org/9-stream/BaseOS/`arch`/os/Pa
     && ln -sf /usr/lib64/libatomic.so.1 /usr/lib64/libatomic.so \
     && python${PYTHON_VERSION} -m venv /opt/vllm \
     && python -m pip install -U pip uv \
-    && uv pip install wheel build setuptools setuptools_scm meson-python cmake ninja cython \
+    && uv pip install wheel build setuptools setuptools_scm setuptools_rust meson-python cmake ninja cython scikit_build_core scikit_build \
     && curl -sL https://ftp2.osuosl.org/pub/ppc64el/openblas/latest/Openblas_${OPENBLAS_VERSION}_ppc64le.tar.gz | tar xvf - -C /usr/local \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
     && cd /tmp && touch control
 
 ###############################################################
-# Stage to build pytorch, torchvision, torchaudio
+# Stage to build torch family
 ###############################################################
 FROM base-builder AS torch-builder
 
-ARG MAX_JOBS
+# buld cache without torch dependent packages
+# sentencepiece has linker issues otherwise
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,src=requirements-common.txt,dst=/requirements-common.txt,ro \
+    source /opt/rh/gcc-toolset-13/enable && \
+    sed -e 's/.*opencv.*//g; s/.*outlines.*//g; s/.*tensors.*//g' requirements-common.txt | uv pip install -r /dev/stdin && \
+    uv pip list
 
+ARG MAX_JOBS
 ARG TORCH_VERSION=2.5.1
 ARG _GLIBCXX_USE_CXX11_ABI=1
-RUN --mount=type=cache,target=/root/.cache/pip \
-    --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv \
     source /opt/rh/gcc-toolset-13/enable &&  \
     git clone --recursive https://github.com/pytorch/pytorch.git -b v${TORCH_VERSION} && \
     cd pytorch && \
@@ -55,18 +61,18 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     python setup.py develop && \
     rm -f dist/torch*+git*whl && \
     MAX_JOBS=${MAX_JOBS:-$(nproc)} \
-    python -m build -w -o /torchwheels/
+    PYTORCH_BUILD_VERSION=${TORCH_VERSION} PYTORCH_BUILD_NUMBER=1 uv build --wheel --out-dir /torchwheels/
 
 ARG TORCHVISION_VERSION=0.20.1
 ARG TORCHVISION_USE_NVJPEG=0
 ARG TORCHVISION_USE_FFMPEG=0
-RUN --mount=type=cache,target=/root/.cache/pip \
-    --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv \
     source /opt/rh/gcc-toolset-13/enable && \
     git clone --recursive https://github.com/pytorch/vision.git -b v${TORCHVISION_VERSION} && \
     cd vision && \
     MAX_JOBS=${MAX_JOBS:-$(nproc)} \
-    python -m build -w --no-isolation -o /torchwheels/
+    BUILD_VERSION=${TORCHVISION_VERSION} \
+    uv build --wheel --out-dir /torchwheels/ --no-build-isolation
 
 ARG TORCHAUDIO_VERSION=2.5.1
 ARG BUILD_SOX=1
@@ -76,13 +82,21 @@ ARG USE_FFMPEG=0
 ARG USE_ROCM=0
 ARG USE_CUDA=0
 ARG TORCHAUDIO_TEST_ALLOW_SKIP_IF_NO_FFMPEG=1
-RUN --mount=type=cache,target=/root/.cache/pip \
-    --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv \
     source /opt/rh/gcc-toolset-13/enable && \
     git clone --recursive https://github.com/pytorch/audio.git -b v${TORCHAUDIO_VERSION} && \
     cd audio && \
     MAX_JOBS=${MAX_JOBS:-$(nproc)} \
-    python -m build -w --no-isolation -o /torchwheels/
+    BUILD_VERSION=${TORCHAUDIO_VERSION} \
+    uv build --wheel --out-dir /torchwheels/ --no-build-isolation
+
+# buld cache with torch dependent packages
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,src=requirements-common.txt,dst=/requirements-common.txt,ro \
+    source /opt/rh/gcc-toolset-13/enable && \
+    grep "outlines" requirements-common.txt | uv pip install -r /dev/stdin && \
+    grep "tensors" requirements-common.txt | uv pip install -r /dev/stdin && \
+    uv pip list
 
 ###############################################################
 # Stage to build pyarrow
@@ -92,9 +106,8 @@ FROM base-builder AS arrow-builder
 ARG MAX_JOBS
 ARG PYARROW_PARALLEL
 
-ARG PYARROW_VERSION=19.0.0
-RUN --mount=type=cache,target=/root/.cache/pip \
-    --mount=type=cache,target=/root/.cache/uv \
+ARG PYARROW_VERSION=19.0.1
+RUN --mount=type=cache,target=/root/.cache/uv \
     source /opt/rh/gcc-toolset-13/enable && \
     git clone --recursive https://github.com/apache/arrow.git -b apache-arrow-${PYARROW_VERSION} && \
     cd arrow/cpp && \
@@ -123,63 +136,58 @@ FROM base-builder AS cv-builder
 ARG MAX_JOBS
 ARG OPENCV_VERSION=84
 ARG ENABLE_HEADLESS=1
-RUN --mount=type=cache,target=/root/.cache/pip \
-    --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv \
     source /opt/rh/gcc-toolset-13/enable && \
     git clone --recursive https://github.com/opencv/opencv-python.git -b ${OPENCV_VERSION} && \
     cd opencv-python && \
     sed -i 's/"setuptools==59.2.0",/"setuptools<70.0",/g' pyproject.toml && \
-    python -m build -w -o /opencvwheels/
+    python -m build --wheel --installer=uv --outdir /opencvwheels/
+
+# build opencv dependent packages
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,src=requirements-common.txt,dst=/requirements-common.txt,ro \
+    source /opt/rh/gcc-toolset-13/enable && \
+    uv pip install /opencvwheels/*.whl && \
+    uv pip list | grep opencv && \
+    grep "opencv" requirements-common.txt | uv pip install -r /dev/stdin --no-build-isolation && \
+    uv pip list
 
 ###############################################################
-# Stage to build & install vllm
+# Stage to build vllm - this stage builds and installs
+# vllm, tensorizer and vllm-tgis-adapter and builds uv cache
+# for transitive dependencies - eg. grpcio
 ###############################################################
-# Why is this stage needed?
-# There are packages which vllm depends on which build from src provided compilers are present
-# To keep the final image as small as possible, we can have all the wheels build in this stage
-# and consume it in the final stage
-FROM base-builder AS vllm-deps
+FROM base-builder AS vllm-builder
 
-ARG VLLM_TGIS_ADAPTER_VERSION=0.6.2
-ARG TGIS_PATCH=178d4baf
-ARG GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1
-
-# create artificial dependencies between stages
-# wait for torch, arrow & openv build stages
 COPY --from=torch-builder /tmp/control /dev/null
 COPY --from=arrow-builder /tmp/control /dev/null
 COPY --from=cv-builder /tmp/control /dev/null
 
-# build vllm wheel
-# Note: use pip instead of uv to build the pip cache
-ARG VLLM_TARGET_DEVICE=cpu
-RUN --mount=type=cache,target=/root/.cache/pip \
-    --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,from=torch-builder,source=/torchwheels/,target=/torchwheels/,ro \
     --mount=type=bind,from=arrow-builder,source=/arrowwheels/,target=/arrowwheels/,ro \
     --mount=type=bind,from=cv-builder,source=/opencvwheels/,target=/opencvwheels/,ro \
-    --mount=type=bind,src=.,dst=/vllm,rw \
+    --mount=type=bind,src=.,dst=/src/,rw \
     source /opt/rh/gcc-toolset-13/enable && \
-    pip install -v \
-        /arrowwheels/*.whl \
-        /opencvwheels/*.whl \
-        /torchwheels/*.whl && \
-    cd /vllm && \
-    pip install pandas==2.0 && \
-    pip install -v ".[tensorizer]" --no-build-isolation && \
-    python -m build -w -o /wheelsdir/ --no-isolation && \
-    cd .. && \
-    git clone https://github.com/opendatahub-io/vllm-tgis-adapter.git -b ${VLLM_TGIS_ADAPTER_VERSION} && \
-    cd vllm-tgis-adapter && \
-    git cherry-pick --no-commit ${TGIS_PATCH} && \
-    python -m build -w -o /wheelsdir/
+    uv pip install /opencvwheels/*.whl /arrowwheels/*.whl /torchwheels/*.whl && \
+    sed -i -e 's/.*torch.*//g' /src/pyproject.toml /src/requirements-*.txt && \
+    uv pip install pandas && \
+    uv pip install -r /src/requirements-common.txt -r /src/requirements-cpu.txt -r /src/requirements-build.txt --no-build-isolation && \
+    dnf install -y kmod && \
+    export VLLM_TARGET_DEVICE=cpu && \
+    export GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1 && \
+    cd /src/ && \
+    uv pip install ".[tensorizer]" --no-build-isolation && \
+    uv pip install vllm-tgis-adapter==0.6.3 && \
+    uv build --wheel --out-dir /vllmwheel/ --no-build-isolation
+
 
 
 ###############################################################
 #                   FINAL VLLM IMAGE STAGE                    #
 ###############################################################
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal
+FROM registry.access.redhat.com/ubi9/ubi-minimal AS vllm-openai
 
 ARG PYTHON_VERSION=3.12
 ARG OPENBLAS_VERSION=0.3.29
@@ -189,17 +197,10 @@ ENV PATH=/opt/vllm/bin:$PATH
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig/
 ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib64:/usr/local/lib:/usr/lib64:/usr/lib
 
-
-# create artificial dependencies between stages for independent stages to build in parallel
-COPY --from=torch-builder /tmp/control /dev/null
-COPY --from=arrow-builder /tmp/control /dev/null
-COPY --from=cv-builder /tmp/control /dev/null
-COPY --from=vllm-deps /tmp/control /dev/null
-
 # install gcc-13, python, openblas
 RUN rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
     microdnf install --nodocs -y \
-    tar findutils unzip openssl numactl lapack \
+    tar findutils openssl numactl lapack \
     pkgconfig xsimd gcc-toolset-13 libsndfile \
     libtiff libjpeg openjpeg2 zlib zeromq \
     freetype lcms2 libwebp tcl tk utf8proc \
@@ -210,32 +211,59 @@ RUN rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.
     && python -m pip install -U pip uv \
     && curl -sL https://ftp2.osuosl.org/pub/ppc64el/openblas/latest/Openblas_${OPENBLAS_VERSION}_ppc64le.tar.gz | tar xvf - -C /usr/local
 
-# use pip instead of uv to reuse the pip cache from vllm-deps stage
-# mount cache directory from vllm-deps stage to avoid redundant compilation
-RUN --mount=type=cache,target=/root/.cache/pip \
-    --mount=type=cache,target=/root/.cache/uv \
+
+# create artificial dependencies between stages for independent stages to build in parallel
+COPY --from=torch-builder /tmp/control /dev/null
+COPY --from=arrow-builder /tmp/control /dev/null
+COPY --from=cv-builder /tmp/control /dev/null
+COPY --from=vllm-builder /tmp/control /dev/null
+
+# consume previously built wheels
+RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,from=torch-builder,source=/torchwheels/,target=/torchwheels/,ro \
     --mount=type=bind,from=arrow-builder,source=/arrowwheels/,target=/arrowwheels/,ro \
     --mount=type=bind,from=cv-builder,source=/opencvwheels/,target=/opencvwheels/,ro \
-    --mount=type=bind,from=vllm-deps,source=/wheelsdir/,target=/wheelsdir/,ro \
-    --mount=type=bind,from=vllm-deps,source=/root/.cache,target=/root/.cache,ro \
-    pip install pandas==2.0 && \
-    pip install -v \
-        /arrowwheels/*.whl \
-        /opencvwheels/*.whl \
-        /torchwheels/*.whl \
-        /wheelsdir/*.whl
+    --mount=type=bind,from=vllm-builder,source=/vllmwheel/,target=/vllmwheel/,ro \
+    HOME=/root uv pip install /opencvwheels/*.whl /arrowwheels/*.whl /torchwheels/*.whl /vllmwheel/*.whl
 
-WORKDIR /workspace
+WORKDIR /home/vllm
 # setup non-root user for OpenShift
 RUN umask 002 && \
     useradd --uid 2000 --gid 0 vllm && \
     mkdir -p /home/vllm && \
-    chmod g+rwx /home/vllm /usr/src /workspace
+    chmod g+rwx /home/vllm
+
+ENV HF_HUB_OFFLINE=1 \
+    HOME=/home/vllm \
+    # Allow requested max length to exceed what is extracted from the
+    # config.json
+    # see: https://github.com/vllm-project/vllm/pull/7080
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+    VLLM_USAGE_SOURCE=production-docker-image \
+    VLLM_WORKER_MULTIPROC_METHOD=fork \
+    VLLM_NO_USAGE_STATS=1 \
+    OUTLINES_CACHE_DIR=/tmp/outlines
+
 COPY LICENSE /licenses/vllm.md
 COPY examples/*.jinja /app/data/template/
+ENV GRPC_PORT=8033 \
+    PORT=8000 \
+    # As an optimization, vLLM disables logprobs when using spec decoding by
+    # default, but this would be unexpected to users of a hosted model that
+    # happens to have spec decoding
+    # see: https://github.com/vllm-project/vllm/pull/6485
+    DISABLE_LOGPROBS_DURING_SPEC_DECODING=false
 USER 2000
-WORKDIR /home/vllm
+ENTRYPOINT ["python", "-m", "vllm.entrypoints.openai.api_server"]
+
+FROM vllm-openai as vllm-grpc-adapter
+USER root
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,from=vllm-builder,source=/vllmwheel/,target=/vllmwheel/,ro \
+    HOME=/root uv pip install "$(echo /vllmwheel/*.whl)[tensorizer]" vllm-tgis-adapter==0.6.3 && \
+    uv cache prune
+
 ENV GRPC_PORT=8033 \
     PORT=8000 \
     # As an optimization, vLLM disables logprobs when using spec decoding by
