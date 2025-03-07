@@ -253,7 +253,7 @@ USER root
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,from=build_vllm,src=/workspace/dist,target=/install/vllm/ \
-    HOME=/root uv pip install /install/vllm/*.whl vllm-tgis-adapter==0.6.2
+    HOME=/root uv pip install /install/vllm/*.whl vllm-tgis-adapter==0.6.3
 
 ENV GRPC_PORT=8033 \
     PORT=8000 \
