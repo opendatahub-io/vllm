@@ -9,7 +9,7 @@ ARG vllm_fa_cmake_gpu_arches='80-real;90-real'
 FROM registry.access.redhat.com/ubi9/ubi-minimal:${BASE_UBI_IMAGE_TAG} as base
 ARG PYTHON_VERSION
 ENV PYTHON_VERSION=${PYTHON_VERSION}
-RUN microdnf -y update && microdnf install --nodocs -y \
+RUN microdnf -y update && microdnf install -y --nodocs \
     python${PYTHON_VERSION}-pip python${PYTHON_VERSION}-wheel \
     && microdnf clean all
 
@@ -19,7 +19,7 @@ ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
 # Some utils for dev purposes - tar required for kubectl cp
-RUN microdnf install --nodocs -y \
+RUN microdnf install -y --nodocs \
         which procps findutils tar vim git\
     && microdnf clean all
 
@@ -31,7 +31,7 @@ ARG PYTHON_VERSION
 ENV VIRTUAL_ENV=/opt/vllm
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 ENV PYTHON_VERSION=${PYTHON_VERSION}
-RUN microdnf install --nodocs -y \
+RUN microdnf install -y --nodocs \
     python${PYTHON_VERSION}-devel  && \
     python${PYTHON_VERSION} -m venv $VIRTUAL_ENV && pip install --no-cache -U pip wheel uv && microdnf clean all
 
@@ -45,7 +45,7 @@ RUN curl -Lo /etc/yum.repos.d/cuda-rhel9.repo \
 ENV CUDA_HOME="/usr/local/cuda" \
     PATH="${CUDA_HOME}/bin:${PATH}"
 ENV LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${CUDA_HOME}/lib64/stubs/:${CUDA_HOME}/extras/CUPTI/lib64:${LD_LIBRARY_PATH}"
-RUN microdnf install --nodocs -y \
+RUN microdnf install -y --nodocs \
         cuda-nvcc-12-4 cuda-nvtx-12-4 cuda-libraries-devel-12-4 && \
     microdnf clean all && \
     ln -s ${CUDA_HOME}/lib64/stubs/libcuda.so /usr/lib64/
@@ -93,7 +93,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 # install compiler cache to speed up compilation leveraging local or remote caching
 # git is required for the cutlass kernels
-RUN rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && rpm -ql epel-release && microdnf install --nodocs -y git ccache && microdnf clean all
+RUN rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && rpm -ql epel-release && microdnf install -y --nodocs git ccache && microdnf clean all
 
 COPY . .
 
@@ -127,7 +127,7 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
 #################### libsodium Build IMAGE ####################
 FROM base as libsodium-builder
 
-RUN microdnf install --nodocs -y gcc gzip \
+RUN microdnf install -y --nodocs gcc gzip \
     && microdnf clean all
 
 WORKDIR /usr/src/libsodium
@@ -156,7 +156,7 @@ ENV LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib/python${PYTHON_VERSION}/site-packages/nv
 ENV LD_LIBRARY_PATH="${VIRTUAL_ENV}/lib/python${PYTHON_VERSION}/site-packages/nvidia/nvtx/lib:${LD_LIBRARY_PATH}"
 
 # Triton needs a CC compiler
-RUN microdnf install --nodocs -y gcc \
+RUN microdnf install -y --nodocs gcc \
     rsync \
     && microdnf clean all
 
