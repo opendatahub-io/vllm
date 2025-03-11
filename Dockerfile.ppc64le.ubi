@@ -1,9 +1,8 @@
 ARG BASE_UBI_MIN_IMAGE_TAG=9.5-1741599792
-ARG BASE_UBI_IMAGE_TAG=9.5-1741600006
 ###############################################################
 # base stage with basic dependencies
 ###############################################################
-FROM registry.access.redhat.com/ubi9/ubi:${BASE_UBI_IMAGE_TAG} AS base-builder
+FROM registry.access.redhat.com/ubi9/ubi-minimal:${BASE_UBI_MIN_IMAGE_TAG} AS base-builder
 ARG PYTHON_VERSION=3.12
 ARG OPENBLAS_VERSION=0.3.29
 # Set Environment Variables for venv, cargo & openblas
@@ -15,7 +14,8 @@ ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib64:/usr/local/lib:/usr/lib64:
 # Note: A symlink for libatomic.so is created for gcc-13 (linker fails to find to find libatomic otherwise - reqd. for sentencepiece)
 # Note: A dummy file 'control' is created in /tmp/ to artifically create dependencies between stages when building stages in parallel
 #       when `--jobs=<N>` is passed with podman build command
-RUN dnf install -y https://mirror.stream.centos.org/9-stream/BaseOS/`arch`/os/Packages/centos-gpg-keys-9.0-24.el9.noarch.rpm \
+RUN microdnf install -y dnf \
+    && dnf install -y https://mirror.stream.centos.org/9-stream/BaseOS/`arch`/os/Packages/centos-gpg-keys-9.0-24.el9.noarch.rpm \
         https://mirror.stream.centos.org/9-stream/BaseOS/`arch`/os/Packages/centos-stream-repos-9.0-24.el9.noarch.rpm \
         https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm \
     && dnf config-manager --add-repo https://mirror.stream.centos.org/9-stream/BaseOS/`arch`/os \
