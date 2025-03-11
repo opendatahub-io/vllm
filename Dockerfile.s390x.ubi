@@ -13,7 +13,7 @@ ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
 # Install development utilities
-RUN microdnf install -y \
+RUN microdnf install -y --nodocs \
     which procps findutils tar vim git gcc g++ make patch zlib-devel \
     libjpeg-turbo-devel libtiff-devel libpng-devel libwebp-devel freetype-devel harfbuzz-devel \
     openssl-devel openblas openblas-devel autoconf automake libtool cmake gcc-gfortran && \
@@ -26,7 +26,7 @@ ARG PYTHON_VERSION
 ENV VIRTUAL_ENV=/opt/vllm
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 ENV PYTHON_VERSION=${PYTHON_VERSION}
-RUN microdnf install -y \
+RUN microdnf install -y --nodocs \
     python${PYTHON_VERSION}-devel python${PYTHON_VERSION}-pip python${PYTHON_VERSION}-wheel  && \
     python${PYTHON_VERSION} -m venv $VIRTUAL_ENV && pip install --no-cache -U pip wheel uv && microdnf clean all
 
