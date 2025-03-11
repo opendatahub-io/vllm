@@ -1,8 +1,8 @@
-ARG BASE_UBI_MIN_IMAGE_TAG=9.5-1741599792
+ARG BASE_UBI_IMAGE_TAG=9.5-1741599792
 ###############################################################
 # base stage with basic dependencies
 ###############################################################
-FROM registry.access.redhat.com/ubi9/ubi-minimal:${BASE_UBI_MIN_IMAGE_TAG} AS base-builder
+FROM registry.access.redhat.com/ubi9/ubi-minimal:${BASE_UBI_IMAGE_TAG} AS base-builder
 ARG PYTHON_VERSION=3.12
 ARG OPENBLAS_VERSION=0.3.29
 # Set Environment Variables for venv, cargo & openblas
@@ -169,7 +169,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ###############################################################
 #                   FINAL VLLM IMAGE STAGE                    #
 ###############################################################
-FROM registry.access.redhat.com/ubi9/ubi-minimal:${BASE_UBI_MIN_IMAGE_TAG} AS vllm-openai
+FROM registry.access.redhat.com/ubi9/ubi-minimal:${BASE_UBI_IMAGE_TAG} AS vllm-openai
 ARG PYTHON_VERSION=3.12
 ARG OPENBLAS_VERSION=0.3.29
 # Set Environment Variables for venv & openblas
