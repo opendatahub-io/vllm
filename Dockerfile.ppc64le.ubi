@@ -12,7 +12,7 @@ ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig/
 ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib64:/usr/local/lib:/usr/lib64:/usr/lib
 # install gcc-13, python, rust, openblas
 # Note: A symlink for libatomic.so is created for gcc-13 (linker fails to find to find libatomic otherwise - reqd. for sentencepiece)
-# Note: A dummy file 'control' is created in /tmp/ to artifically create dependencies between stages when building stages in parallel
+# Note: A dummy file 'control' is created in /tmp/ to artificially create dependencies between stages when building stages in parallel
 #       when `--jobs=<N>` is passed with podman build command
 RUN microdnf install -y dnf \
     && dnf install -y https://mirror.stream.centos.org/9-stream/BaseOS/`arch`/os/Packages/centos-gpg-keys-9.0-24.el9.noarch.rpm \
@@ -40,7 +40,7 @@ RUN microdnf install -y dnf \
 # Stage to build torch family
 ###############################################################
 FROM base-builder AS torch-builder
-# buld cache without torch dependent packages
+# build cache without torch dependent packages
 # sentencepiece has linker issues otherwise
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,src=requirements-common.txt,dst=/requirements-common.txt,ro \
