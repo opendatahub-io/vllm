@@ -170,7 +170,13 @@ USER root
 
 ENV GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1
 
+ENV CARGO_HOME=/root/.cargo
+ENV RUSTUP_HOME=/root/.rustup
+ENV PATH="$CARGO_HOME/bin:$RUSTUP_HOME/bin:$PATH"
+
 RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,from=rust,source=/root/.cargo,target=/root/.cargo,rw \
+    --mount=type=bind,from=rust,source=/root/.rustup,target=/root/.rustup,rw \
     HOME=/root uv pip install "$(echo /workspace/vllm/dist/*.whl)[tensorizer]" vllm-tgis-adapter==0.6.3
 
 ENV GRPC_PORT=8033 \
