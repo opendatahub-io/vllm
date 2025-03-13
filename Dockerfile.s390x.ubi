@@ -16,7 +16,7 @@ ENV LANG=C.UTF-8 \
 RUN microdnf install -y --nodocs \
     which procps findutils tar vim git gcc g++ make patch zlib-devel \
     libjpeg-turbo-devel libtiff-devel libpng-devel libwebp-devel freetype-devel harfbuzz-devel \
-    openssl-devel openblas openblas-devel autoconf automake libtool cmake gcc-gfortran && \
+    openssl-devel openblas openblas-devel autoconf automake libtool cmake gcc-gfortran perl-core && \
     microdnf clean all
 
 # Python Installation
@@ -64,9 +64,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM python-install AS numa-build
 # Install numactl (needed for numa.h dependency)
 WORKDIR /tmp
-RUN curl -LO https://github.com/numactl/numactl/archive/refs/tags/v2.0.16.tar.gz && \
-    tar -xvzf v2.0.16.tar.gz && \
-    cd numactl-2.0.16 && \
+RUN curl -LO https://github.com/numactl/numactl/archive/refs/tags/v2.0.18.tar.gz && \
+    tar -xvzf v2.0.18.tar.gz && \
+    cd numactl-2.0.18 && \
     ./autogen.sh && \
     ./configure && \
     make
