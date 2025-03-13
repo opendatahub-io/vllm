@@ -16,7 +16,7 @@ ENV LANG=C.UTF-8 \
 RUN microdnf install -y --nodocs \
     which procps findutils tar vim git gcc g++ make patch zlib-devel \
     libjpeg-turbo-devel libtiff-devel libpng-devel libwebp-devel freetype-devel harfbuzz-devel \
-    openssl-devel openblas openblas-devel autoconf automake libtool cmake gcc-gfortran perl-core && \
+    openssl-devel openblas openblas-devel autoconf automake libtool cmake gcc-gfortran && \
     microdnf clean all
 
 # Python Installation
@@ -163,6 +163,8 @@ WORKDIR /home/vllm
 # Set the default entrypoint
 ENTRYPOINT ["python", "-m", "vllm.entrypoints.openai.api_server"]
 
+FROM python-install AS perl
+RUN microdnf install -y perl-core
 
 FROM vllm-cpu as vllm-grpc-adapter
 
@@ -173,6 +175,9 @@ ENV GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,from=rust,source=/root/.cargo,target=/root/.cargo,rw \
     --mount=type=bind,from=rust,source=/root/.rustup,target=/root/.rustup,rw \
+    --mount=type=bind,from=perl,source=/usr/bin/perl,target=/usr/bin/perl \
+    --mount=type=bind,from=perl,source=/usr/share/perl5,target=/usr/share/perl5 \
+    --mount=type=bind,from=perl,source=/usr/lib64/perl5,target=/usr/lib64/perl5 \
     export CARGO_HOME=/root/.cargo \
     export RUSTUP_HOME=/root/.rustup \
     export PATH="/root/.cargo/bin:/root/.rustup/bin:$PATH" \
