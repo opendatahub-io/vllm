@@ -16,7 +16,7 @@ ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig/
 ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib64:/usr/local/lib:/usr/lib64:/usr/lib
 
 # install gcc-13, python, rust, openblas
-# Note: A symlink for libatomic.so is created for gcc-13 (linker fails to find to find libatomic otherwise - reqd. for sentencepiece)
+# Note: A symlink for libatomic.so is created for gcc-13 (linker fails to find libatomic otherwise - reqd. for sentencepiece)
 # Note: A dummy file 'control' is created in /tmp/ to artificially create dependencies between stages when building stages in parallel
 #       when `--jobs=<N>` is passed with podman build command
 RUN microdnf install -y dnf \
@@ -202,13 +202,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM base-builder AS numa-builder
 
+# Note: Building numactl with gcc-11. Compiling with gcc-13 in this builder stage will 
+# trigger recompilation with gcc-11 (and require libtool) in the final stage where we do not have gcc-13
 ARG MAX_JOBS
 ARG NUMACTL_VERSION=2.0.19
 RUN git clone --recursive https://github.com/numactl/numactl.git -b v${NUMACTL_VERSION} \
-    && cd numactl && source /opt/rh/gcc-toolset-13/enable \
-    && mkdir /numabuild/ \
-    && ./autogen.sh && ./configure --prefix /numabuild/ \
-    && make install -j ${MAX_JOBS:-$(nproc)}
+    && cd numactl \
+    && autoreconf -i && ./configure \
+    && make -j ${MAX_JOBS:-$(nproc)}
 
 ###############################################################
 # Stage to build lapack
@@ -220,10 +221,8 @@ ARG MAX_JOBS
 ARG LAPACK_VERSION=3.12.1
 RUN git clone --recursive https://github.com/Reference-LAPACK/lapack.git -b v${LAPACK_VERSION} \
     && cd lapack && source /opt/rh/gcc-toolset-13/enable \
-    && mkdir /lapackbuild/ \
-    && mkdir build && cd build \
-    && cmake -DCMAKE_INSTALL_PREFIX=/lapackbuild/ .. \
-    && cmake --build . -j ${MAX_JOBS:-$(nproc)} --target install
+    && cmake -B build -S . \
+    && cmake --build build -j ${MAX_JOBS:-$(nproc)}
 
 
 ###############################################################
@@ -250,8 +249,9 @@ COPY --from=numa-builder /tmp/control /dev/null
 COPY --from=lapack-builder /tmp/control /dev/null
 
 # install gcc-11, python, openblas, numactl, lapack
-RUN --mount=type=bind,from=numa-builder,source=/numabuild/,target=/numabuild/ \
-    --mount=type=bind,from=lapack-builder,source=/lapackbuild/,target=/lapackbuild/ \
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,from=numa-builder,source=/numactl/,target=/numactl/,rw \
+    --mount=type=bind,from=lapack-builder,source=/lapack/,target=/lapack/,rw \
     rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
     microdnf install --nodocs -y \
     tar findutils openssl \
@@ -264,8 +264,10 @@ RUN --mount=type=bind,from=numa-builder,source=/numabuild/,target=/numabuild/ \
     && python${PYTHON_VERSION} -m venv ${VIRTUAL_ENV} \
     && python -m pip install -U pip uv --no-cache \
     && curl -sL https://ftp2.osuosl.org/pub/ppc64el/openblas/latest/Openblas_${OPENBLAS_VERSION}_ppc64le.tar.gz | tar xvf - -C /usr/local \
-    && cp -R /numabuild/* /usr/local/ \
-    && cp -R /lapackbuild/* /usr/local/
+    && make -C /numactl install \
+    && uv pip install cmake \
+    && cmake --install /lapack/build \
+    && uv pip uninstall cmake
 
 # consume previously built wheels
 RUN --mount=type=cache,target=/root/.cache/uv \
