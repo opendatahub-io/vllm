@@ -107,7 +107,6 @@ ENV LD_LIBRARY_PATH="/opt/vllm/lib64/python${PYTHON_VERSION}/site-packages/torch
 ENV C_INCLUDE_PATH="/usr/local/include:$C_INCLUDE_PATH"
 ENV UV_LINK_MODE=copy
 
-
 COPY . /workspace/vllm
 WORKDIR /workspace/vllm
 
