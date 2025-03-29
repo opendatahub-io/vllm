@@ -366,7 +366,7 @@ pandas==2.2.3
     #   statsmodels
 pathspec==0.12.1
     # via black
-pathvalidate==3.2.1
+pathvalidate==3.2.3
     # via pytablewriter
 patsy==1.0.1
     # via statsmodels
