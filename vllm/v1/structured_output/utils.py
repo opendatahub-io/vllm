@@ -251,11 +251,7 @@ def validate_structured_output_request(
     gd_params = sampling_params.guided_decoding
 
     if gd_params.regex:
-        try:
-            xgr.Grammar.from_regex(gd_params.regex)
-        except Exception as err:
-            raise ValueError("Failed to transform regex into a grammar: "
-                             f"{err}") from err
+        raise ValueError("Regex structured output is not supported.")
 
     if gd_params.choice:
         choice_grammar = choice_as_grammar(gd_params.choice)
