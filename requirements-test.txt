@@ -583,7 +583,7 @@ tenacity==9.0.0
     #   plotly
 tensorizer==2.9.0
     # via -r requirements-test.in
-threadpoolctl==3.5.0
+threadpoolctl==3.6.0
     # via scikit-learn
 tiktoken==0.7.0
     # via
