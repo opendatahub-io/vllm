@@ -397,7 +397,7 @@ pqdm==0.2.0
     # via -r requirements-test.in
 propcache==0.2.0
     # via yarl
-protobuf==5.28.3
+protobuf==6.30.2
     # via
     #   ray
     #   tensorizer
