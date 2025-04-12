@@ -476,7 +476,7 @@ pyyaml==6.0.2
     #   timm
     #   transformers
     #   vocos
-rapidfuzz==3.12.1
+rapidfuzz==3.13.0
     # via jiwer
 ray[adag]==2.40.0
     # via -r requirements-test.in
