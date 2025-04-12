@@ -180,7 +180,7 @@ idna==3.10
     #   httpx
     #   requests
     #   yarl
-inflect==5.6.2
+inflect==7.5.0
     # via datamodel-code-generator
 iniconfig==2.0.0
     # via pytest
