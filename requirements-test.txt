@@ -39,7 +39,7 @@ awscli==1.35.23
     # via -r requirements-test.in
 bitsandbytes==0.45.0
     # via -r requirements-test.in
-black==24.10.0
+black==25.1.0
     # via datamodel-code-generator
 boto3==1.35.57
     # via tensorizer
