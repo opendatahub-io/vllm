@@ -1,4 +1,4 @@
-ARG BASE_UBI_IMAGE_TAG=9.5-1742914212
+ARG BASE_UBI_IMAGE_TAG=9.5-1745855087
 
 ###############################################################
 # base stage with basic dependencies
