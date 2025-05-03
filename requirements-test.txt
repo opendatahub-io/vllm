@@ -171,7 +171,7 @@ huggingface-hub==0.26.2
     #   tokenizers
     #   transformers
     #   vocos
-humanize==4.11.0
+humanize==4.12.3
     # via runai-model-streamer
 idna==3.10
     # via
