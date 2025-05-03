@@ -567,7 +567,7 @@ sqlitedict==2.1.0
     # via lm-eval
 statsmodels==0.14.4
     # via genai-perf
-sympy==1.13.1
+sympy==1.14.0
     # via
     #   einx
     #   torch
