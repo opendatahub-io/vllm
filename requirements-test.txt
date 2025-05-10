@@ -517,7 +517,7 @@ rpds-py==0.20.1
     #   referencing
 rsa==4.7.2
     # via awscli
-runai-model-streamer==0.11.0
+runai-model-streamer==0.13.1
     # via -r requirements-test.in
 runai-model-streamer-s3==0.11.0
     # via -r requirements-test.in
