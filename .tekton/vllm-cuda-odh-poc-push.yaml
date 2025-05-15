@@ -8,7 +8,7 @@ metadata:
     pipelinesascode.tekton.dev/cancel-in-progress: "false"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch
-      == "konflux-poc"
+      == "konflux-poc" && ( !".tekton/**".pathChanged() || ".tekton/vllm-cuda-odh-poc-push.yaml".pathChanged() )
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: odh-release
@@ -26,6 +26,19 @@ spec:
     value: quay.io/redhat-user-workloads/open-data-hub-tenant/vllm-cuda-odh-poc:{{revision}}
   - name: dockerfile
     value: Dockerfile.ubi
+  - name: skip-checks
+    value: true
+  - name: build-args
+    value:
+      - max_jobs=6
+      - nvcc_threads=2
+  - name: fetch-git-tags
+    value: true
+  - name: clone-depth
+    value: "2147483647"
+  - name: build-platforms
+    value:
+      - linux-extra-fast/amd64
   pipelineSpec:
     description: |
       This pipeline is ideal for building container images from a Containerfile while maintaining trust after pipeline customization.
@@ -108,6 +121,18 @@ spec:
         VMs
       name: privileged-nested
       type: string
+    - name: build-platforms
+      default:
+      - linux-extra-fast/amd64
+      description: List of platforms to build the container images on. The available set of values is determined by the configuration of the multi-platform-controller.
+    - description: Fetch all tags for the repo
+      name: fetch-git-tags
+      type: string
+      default: "false"
+    - description: Perform a shallow clone, fetching only the most recent N commits
+      name: clone-depth
+      type: string
+      default: "1"
     results:
     - description: ""
       name: IMAGE_URL
@@ -149,6 +174,10 @@ spec:
         value: $(params.output-image).git
       - name: ociArtifactExpiresAfter
         value: $(params.image-expires-after)
+      - name: fetchTags
+        value: $(params.fetch-git-tags)
+      - name: depth
+        value: $(params.clone-depth)
       runAfter:
       - init
       taskRef:
