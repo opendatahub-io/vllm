@@ -10,7 +10,7 @@ repos:
     additional_dependencies: [toml] # TODO: Remove when yapf is upgraded
     exclude: 'vllm/third_party/.*'
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.9.3
+  rev: v0.11.9
   hooks:
   - id: ruff
     args: [--output-format, github, --fix]
