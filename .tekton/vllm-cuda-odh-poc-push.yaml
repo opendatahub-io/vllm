@@ -17,6 +17,9 @@ metadata:
   name: vllm-cuda-odh-poc-on-push
   namespace: open-data-hub-tenant
 spec:
+  timeouts:
+    pipeline: 8h
+    tasks: 4h
   params:
   - name: git-url
     value: '{{source_url}}'
