@@ -458,7 +458,7 @@ python-dateutil==2.9.0.post0
     #   typepy
 python-rapidjson==1.20
     # via tritonclient
-pytz==2024.2
+pytz==2025.2
     # via
     #   pandas
     #   typepy
