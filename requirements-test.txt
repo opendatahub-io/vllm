@@ -260,7 +260,7 @@ multiprocess==0.70.16
     #   evaluate
 mypy-extensions==1.0.0
     # via black
-networkx==3.2.1
+networkx==3.4.2
     # via torch
 nltk==3.9.1
     # via rouge-score
