@@ -679,7 +679,7 @@ xxhash==3.5.0
     # via
     #   datasets
     #   evaluate
-yarl==1.17.1
+yarl==1.20.0
     # via aiohttp
 zstandard==0.23.0
     # via lm-eval
