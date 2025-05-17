@@ -374,7 +374,7 @@ peft==0.13.2
     # via
     #   -r requirements-test.in
     #   lm-eval
-pillow==10.4.0
+pillow==11.2.1
     # via
     #   genai-perf
     #   matplotlib
