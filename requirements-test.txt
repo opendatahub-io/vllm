@@ -387,7 +387,7 @@ platformdirs==4.3.6
     #   pooch
 plotly==5.24.1
     # via genai-perf
-pluggy==1.5.0
+pluggy==1.6.0
     # via pytest
 pooch==1.8.2
     # via librosa
