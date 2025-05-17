@@ -519,7 +519,7 @@ rsa==4.7.2
     # via awscli
 runai-model-streamer==0.11.0
     # via -r requirements-test.in
-runai-model-streamer-s3==0.11.0
+runai-model-streamer-s3==0.13.2
     # via -r requirements-test.in
 s3transfer==0.10.3
     # via
