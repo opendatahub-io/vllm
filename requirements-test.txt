@@ -395,7 +395,7 @@ portalocker==2.10.1
     # via sacrebleu
 pqdm==0.2.0
     # via -r requirements-test.in
-propcache==0.2.0
+propcache==0.3.1
     # via yarl
 protobuf==5.28.3
     # via
