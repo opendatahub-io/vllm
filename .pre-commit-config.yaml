@@ -34,7 +34,7 @@ repos:
     types_or: [c++, cuda]
     args: [--style=file, --verbose]
 - repo: https://github.com/jackdewinter/pymarkdown
-  rev: v0.9.27
+  rev: v0.9.30
   hooks:
   - id: pymarkdown
     args: [fix]
