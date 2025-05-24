@@ -521,7 +521,7 @@ runai-model-streamer==0.11.0
     # via -r requirements-test.in
 runai-model-streamer-s3==0.11.0
     # via -r requirements-test.in
-s3transfer==0.10.3
+s3transfer==0.13.0
     # via
     #   awscli
     #   boto3
