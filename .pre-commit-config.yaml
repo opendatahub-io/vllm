@@ -51,7 +51,7 @@ repos:
     entry: tools/mypy.sh 0 "local"
     language: python
     types: [python]
-    additional_dependencies: &mypy_deps [mypy==1.11.1, types-setuptools, types-PyYAML, types-requests]
+    additional_dependencies: &mypy_deps [mypy==1.16.0, types-setuptools, types-PyYAML, types-requests]
     stages: [pre-commit] # Don't run in CI
     exclude: 'vllm/third_party/.*'
   - id: mypy-3.9 # TODO: Use https://github.com/pre-commit/mirrors-mypy when mypy setup is less awkward
