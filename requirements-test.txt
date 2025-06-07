@@ -303,7 +303,7 @@ numpy==1.26.4
     #   transformers
     #   tritonclient
     #   vocos
-nvidia-cublas-cu12==12.4.5.8
+nvidia-cublas-cu12==12.9.1.4
     # via
     #   nvidia-cudnn-cu12
     #   nvidia-cusolver-cu12
