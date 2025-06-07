@@ -268,7 +268,7 @@ numba==0.60.0
     # via librosa
 numexpr==2.10.1
     # via lm-eval
-numpy==1.26.4
+numpy==2.3.0
     # via
     #   -r requirements-test.in
     #   accelerate
