@@ -391,7 +391,7 @@ pluggy==1.5.0
     # via pytest
 pooch==1.8.2
     # via librosa
-portalocker==2.10.1
+portalocker==3.2.0
     # via sacrebleu
 pqdm==0.2.0
     # via -r requirements-test.in
