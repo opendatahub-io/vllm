@@ -4,7 +4,7 @@
 numba == 0.60.0 # v0.61 doesn't support Python 3.9. Required for N-gram speculative decoding.
 
 # Dependencies for NVIDIA GPUs
-ray[adag] == 2.40.0 # Required for pipeline parallelism in V1.
+ray[adag] ==2.47.0 # Required for pipeline parallelism in V1.
 torch == 2.5.1
 torchaudio==2.5.1
 # These must be updated alongside torch
