@@ -422,7 +422,7 @@ pydantic[email]==2.9.2
     # via
     #   datamodel-code-generator
     #   mistral-common
-pydantic-core==2.23.4
+pydantic-core==2.35.1
     # via pydantic
 pygments==2.18.0
     # via rich
