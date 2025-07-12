@@ -456,7 +456,7 @@ python-dateutil==2.9.0.post0
     #   matplotlib
     #   pandas
     #   typepy
-python-rapidjson==1.20
+python-rapidjson==1.21
     # via tritonclient
 pytz==2024.2
     # via
