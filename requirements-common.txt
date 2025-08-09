@@ -1,6 +1,6 @@
 psutil
 sentencepiece  # Required for LLaMA tokenizer.
-numpy < 2.0.0
+numpy <2.3.3
 requests >= 2.26.0
 tqdm
 blake3
