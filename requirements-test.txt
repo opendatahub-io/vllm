@@ -414,7 +414,7 @@ pyarrow==18.0.0
     #   genai-perf
 pyasn1==0.6.1
     # via rsa
-pybind11==2.13.6
+pybind11==3.0.1
     # via lm-eval
 pycparser==2.22
     # via cffi
