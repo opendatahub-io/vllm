@@ -681,7 +681,7 @@ xxhash==3.5.0
     #   evaluate
 yarl==1.17.1
     # via aiohttp
-zstandard==0.23.0
+zstandard==0.24.0
     # via lm-eval
 
 # The following packages are considered to be unsafe in a requirements file:
