@@ -357,7 +357,7 @@ packaging==24.1
     #   statsmodels
     #   transformers
     #   typepy
-pandas==2.2.3
+pandas==2.3.2
     # via
     #   datasets
     #   evaluate
